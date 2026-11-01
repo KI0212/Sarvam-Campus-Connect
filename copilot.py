@@ -1,6 +1,7 @@
 import os
 import re
 import io
+import traceback
 from typing import List, Dict, Optional
 from config import get_sarvam_client, SUPPORTED_LANGUAGES
 
@@ -77,28 +78,64 @@ class RTICopilot:
         self.messages.append({"role": "assistant", "content": reply})
         return reply
 
-    def transcribe_audio(self, audio_bytes: bytes, mime_type: str = "audio/webm", language_code: str = "unknown") -> Dict[str, str]:
+    def transcribe_audio(self, audio_bytes: bytes, mime_type: str = "audio/wav", language_code: str = "unknown") -> Dict[str, str]:
         """
         Transcribes speech audio using Sarvam Saaras STT (saaras:v3).
-        Supports automatic language detection or specific Indic regional languages.
+        Normalizes MIME types to strip codec parameters (e.g. ;codecs=opus) which Sarvam rejects.
         """
-        ext = "webm" if "webm" in mime_type else "wav" if "wav" in mime_type else "mp3"
+        # Normalize and strip parameters like ';codecs=opus'
+        raw_mime = (mime_type or "").split(";")[0].strip().lower()
+
+        clean_mime = "audio/wav"
+        input_codec = "wav"
+        ext = "wav"
+
+        if "webm" in raw_mime:
+            clean_mime = "audio/webm"
+            input_codec = "webm"
+            ext = "webm"
+        elif "mp4" in raw_mime or "m4a" in raw_mime:
+            clean_mime = "audio/mp4"
+            input_codec = "mp4"
+            ext = "mp4"
+        elif "mp3" in raw_mime or "mpeg" in raw_mime:
+            clean_mime = "audio/mp3"
+            input_codec = "mp3"
+            ext = "mp3"
+        elif "ogg" in raw_mime or "opus" in raw_mime:
+            clean_mime = "audio/ogg"
+            input_codec = "ogg"
+            ext = "ogg"
+
         filename = f"voice_input.{ext}"
-        
-        file_tuple = (filename, io.BytesIO(audio_bytes), mime_type)
-        
+        file_tuple = (filename, io.BytesIO(audio_bytes), clean_mime)
+
         target_lang = language_code if language_code and language_code != "auto" else "unknown"
 
-        res = self.client.speech_to_text.transcribe(
-            file=file_tuple,
-            model="saaras:v3",
-            language_code=target_lang
-        )
-        
-        return {
-            "transcript": res.transcript or "",
-            "language_code": getattr(res, "language_code", target_lang)
-        }
+        # Attempt transcription with codec specified
+        try:
+            res = self.client.speech_to_text.transcribe(
+                file=file_tuple,
+                model="saaras:v3",
+                language_code=target_lang,
+                input_audio_codec=input_codec
+            )
+            return {
+                "transcript": res.transcript or "",
+                "language_code": getattr(res, "language_code", target_lang)
+            }
+        except Exception as e:
+            # Fallback attempt without explicit input_audio_codec
+            print(f"Warning: STT with codec {input_codec} failed ({e}), attempting without explicit codec...")
+            res = self.client.speech_to_text.transcribe(
+                file=file_tuple,
+                model="saaras:v3",
+                language_code=target_lang
+            )
+            return {
+                "transcript": res.transcript or "",
+                "language_code": getattr(res, "language_code", target_lang)
+            }
 
     def synthesize_speech(self, text: str, language_code: str = "en-IN") -> Optional[str]:
         """
@@ -106,16 +143,13 @@ class RTICopilot:
         Returns base64 encoded audio string (WAV format).
         """
         try:
-            # Strip markdown characters for smooth speech
             clean_text = re.sub(r'[*_#`~>\[\]()]', '', text).strip()
             
-            # Select up to first 2-3 sentences for concise, speakable voice reply
             paragraphs = [p.strip() for p in clean_text.split("\n") if p.strip()]
             spoken_text = " ".join(paragraphs[:2]) if paragraphs else clean_text
             if len(spoken_text) > 420:
                 spoken_text = spoken_text[:400] + "..."
 
-            # Map to supported TTS languages (Bulbul v3 supports 11 major Indic languages)
             tts_langs = {'bn-IN', 'en-IN', 'gu-IN', 'hi-IN', 'kn-IN', 'ml-IN', 'mr-IN', 'od-IN', 'pa-IN', 'ta-IN', 'te-IN'}
             target_tts_lang = language_code if language_code in tts_langs else "en-IN"
 
@@ -130,7 +164,7 @@ class RTICopilot:
             print(f"Error in synthesize_speech: {e}")
         return None
 
-    def voice_chat(self, audio_bytes: bytes, mime_type: str = "audio/webm", language_code: str = "unknown") -> Dict[str, any]:
+    def voice_chat(self, audio_bytes: bytes, mime_type: str = "audio/wav", language_code: str = "unknown") -> Dict[str, any]:
         """
         Full Voice Agent cycle:
         1. Speech-to-Text via Sarvam Saaras
@@ -203,7 +237,6 @@ Provide only the formal application draft in clean markdown, suitable for printi
                 "draft": english_draft
             }
 
-        # Translate to target Indic language using Sarvam Translation API
         translated_draft = self.translate_draft(english_draft, target_lang=language_code)
         return {
             "language_code": language_code,

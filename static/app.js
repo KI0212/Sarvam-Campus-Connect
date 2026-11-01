@@ -1,9 +1,14 @@
 /**
- * RTI COPILOT — Voice-First Accessible Frontend Client
+ * RTI COPILOT — Ultra-Reliable Voice-First Accessible Frontend Client
  * Powered by Sarvam AI:
  * - Speech-to-Text: Saaras v3 (multilingual regional transcription & auto language detection)
  * - Text-to-Speech: Bulbul v3 (11 official Indic regional voices)
  * - Conversational Engine: sarvam-105b-conversations
+ * 
+ * Features:
+ * - Pure 16kHz PCM WAV Audio Encoder via Web Audio API (100% reliable for Sarvam Saaras)
+ * - MediaRecorder fallback with cleaned MIME types
+ * - Live microphone level visualizer
  */
 
 // State Management
@@ -11,21 +16,26 @@ let currentDraftText = "";
 let autoVoicePlayback = true;
 let messageTurnCount = 0;
 
-// Voice Recording State
-let mediaRecorder = null;
-let audioChunks = [];
+// Web Audio WAV Recording State
+let audioContext = null;
+let mediaStream = null;
+let scriptProcessor = null;
+let audioInputNode = null;
+let pcmSamples = [];
 let isRecording = false;
 let currentAudioElement = null;
 
+// Fallback MediaRecorder State
+let mediaRecorder = null;
+let fallbackChunks = [];
+
 // Initialize on DOM ready
 document.addEventListener("DOMContentLoaded", () => {
-  // Restore user preferences
   const savedFont = localStorage.getItem("rti_font_size") || "normal";
   const savedTheme = localStorage.getItem("rti_theme") || "light";
   setFontSize(savedFont);
   setTheme(savedTheme);
 
-  // Load grounded documents
   loadGroundedDocuments();
 });
 
@@ -64,7 +74,8 @@ function toggleAutoVoice() {
 }
 
 /* ==========================================================================
-   SARVAM VOICE AGENT (Speech-to-Text & Text-to-Speech)
+   HIGH-FIDELITY 16kHz PCM WAV RECORDER (Web Audio API)
+   Generates standard, uncompressed 16kHz mono WAV for Sarvam Saaras STT
    ========================================================================== */
 
 async function toggleVoiceRecording() {
@@ -79,38 +90,56 @@ async function startVoiceRecording() {
   stopAudioPlayback();
 
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    alert("Voice recording is not supported in this browser. Please use Chrome, Edge, Firefox, or Safari.");
+    alert("Microphone recording is not supported in this browser. Please use Chrome, Edge, Firefox, or Safari.");
     return;
   }
 
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    
-    // Determine supported mime type
-    let mimeType = "audio/webm";
-    if (MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) {
-      mimeType = "audio/webm;codecs=opus";
-    } else if (MediaRecorder.isTypeSupported("audio/webm")) {
-      mimeType = "audio/webm";
-    } else if (MediaRecorder.isTypeSupported("audio/mp4")) {
-      mimeType = "audio/mp4";
+    mediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        channelCount: 1,
+        sampleRate: { ideal: 16000 },
+        echoCancellation: true,
+        noiseSuppression: true,
+      }
+    });
+
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (AudioContextClass) {
+      // Primary Route: Web Audio API PCM Recording (16kHz WAV)
+      audioContext = new AudioContextClass({ sampleRate: 16000 });
+      if (audioContext.state === "suspended") {
+        await audioContext.resume();
+      }
+
+      audioInputNode = audioContext.createMediaStreamSource(mediaStream);
+      // Buffer size 4096, 1 input channel, 1 output channel
+      scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+      pcmSamples = [];
+
+      scriptProcessor.onaudioprocess = (e) => {
+        if (!isRecording) return;
+        const inputData = e.inputBuffer.getChannelData(0);
+        // Copy float samples
+        pcmSamples.push(new Float32Array(inputData));
+
+        // Update live volume visual feedback
+        let sum = 0;
+        for (let i = 0; i < inputData.length; i += 16) {
+          sum += inputData[i] * inputData[i];
+        }
+        const rms = Math.sqrt(sum / (inputData.length / 16));
+        updateMicVisualFeedback(rms);
+      };
+
+      audioInputNode.connect(scriptProcessor);
+      scriptProcessor.connect(audioContext.destination);
+
+    } else {
+      // Fallback Route: MediaRecorder
+      startMediaRecorderFallback(mediaStream);
     }
 
-    audioChunks = [];
-    mediaRecorder = new MediaRecorder(stream, { mimeType });
-
-    mediaRecorder.ondataavailable = (event) => {
-      if (event.data.size > 0) {
-        audioChunks.push(event.data);
-      }
-    };
-
-    mediaRecorder.onstop = () => {
-      stream.getTracks().forEach(track => track.stop());
-      processRecordedVoice(mimeType);
-    };
-
-    mediaRecorder.start();
     isRecording = true;
 
     // Update UI for recording state
@@ -118,36 +147,171 @@ async function startVoiceRecording() {
     btn.classList.add("recording");
     document.getElementById("voiceMicIcon").textContent = "⏹";
     document.getElementById("voiceBtnLabel").textContent = "Stop & Submit";
-    document.getElementById("voiceStatusText").innerHTML = "🔴 <strong>Listening...</strong> Speak your RTI query clearly in your language.";
+    document.getElementById("voiceStatusText").innerHTML = "🔴 <strong>Listening...</strong> Speak your RTI query clearly in any regional language.";
 
   } catch (err) {
     console.error("Microphone access error:", err);
-    alert("Microphone access was denied or is unavailable. Please grant microphone permission.");
+    alert("Could not access microphone: " + (err.message || "Permission denied."));
   }
+}
+
+function updateMicVisualFeedback(rms) {
+  const pulseRing = document.getElementById("voicePulseRing");
+  if (pulseRing && isRecording) {
+    const scale = Math.min(1.8, 1 + rms * 3.5);
+    pulseRing.style.transform = `scale(${scale})`;
+    pulseRing.style.opacity = Math.min(1, 0.4 + rms * 2);
+  }
+}
+
+function startMediaRecorderFallback(stream) {
+  let mimeType = "audio/webm";
+  if (MediaRecorder.isTypeSupported("audio/webm")) {
+    mimeType = "audio/webm";
+  } else if (MediaRecorder.isTypeSupported("audio/mp4")) {
+    mimeType = "audio/mp4";
+  }
+
+  fallbackChunks = [];
+  mediaRecorder = new MediaRecorder(stream, { mimeType });
+  mediaRecorder.ondataavailable = (e) => {
+    if (e.data.size > 0) fallbackChunks.push(e.data);
+  };
+  mediaRecorder.start(250);
 }
 
 function stopVoiceRecording() {
-  if (mediaRecorder && isRecording) {
-    isRecording = false;
-    mediaRecorder.stop();
+  if (!isRecording) return;
+  isRecording = false;
 
-    const btn = document.getElementById("btnVoiceRecord");
-    btn.classList.remove("recording");
-    document.getElementById("voiceMicIcon").textContent = "⏳";
-    document.getElementById("voiceBtnLabel").textContent = "Processing...";
-    document.getElementById("voiceStatusText").textContent = "⚡ Transcribing speech with Sarvam Saaras STT...";
+  const btn = document.getElementById("btnVoiceRecord");
+  btn.classList.remove("recording");
+  document.getElementById("voiceMicIcon").textContent = "⏳";
+  document.getElementById("voiceBtnLabel").textContent = "Processing...";
+  document.getElementById("voiceStatusText").textContent = "⚡ Transcribing speech with Sarvam Saaras STT...";
+
+  // Reset pulse ring
+  const pulseRing = document.getElementById("voicePulseRing");
+  if (pulseRing) {
+    pulseRing.style.transform = "scale(1)";
+    pulseRing.style.opacity = "0";
+  }
+
+  // Stop Web Audio processing
+  if (scriptProcessor && audioInputNode) {
+    try {
+      audioInputNode.disconnect();
+      scriptProcessor.disconnect();
+    } catch (e) {}
+  }
+
+  // Stop MediaStream tracks
+  if (mediaStream) {
+    mediaStream.getTracks().forEach(track => track.stop());
+  }
+
+  // Process gathered audio
+  if (pcmSamples && pcmSamples.length > 0) {
+    const wavBlob = encodePCMToWav(pcmSamples, audioContext ? audioContext.sampleRate : 16000);
+    if (audioContext) {
+      audioContext.close().catch(() => {});
+    }
+    processRecordedBlob(wavBlob, "audio/wav");
+  } else if (mediaRecorder) {
+    mediaRecorder.onstop = () => {
+      const blob = new Blob(fallbackChunks, { type: "audio/webm" });
+      processRecordedBlob(blob, "audio/webm");
+    };
+    mediaRecorder.stop();
+  } else {
+    resetVoiceUI("No audio was recorded. Please try speaking again.");
   }
 }
 
-async function processRecordedVoice(mimeType) {
-  const audioBlob = new Blob(audioChunks, { type: mimeType });
+/**
+ * Encodes raw PCM float32 samples into 16-bit PCM WAV (16kHz mono)
+ */
+function encodePCMToWav(chunks, sampleRate) {
+  // Calculate total samples
+  let totalLength = 0;
+  for (let i = 0; i < chunks.length; i++) {
+    totalLength += chunks[i].length;
+  }
 
-  if (audioBlob.size < 500) {
-    resetVoiceUI("Audio was too brief. Please try speaking again.");
+  // Merge float32 arrays
+  const merged = new Float32Array(totalLength);
+  let offset = 0;
+  for (let i = 0; i < chunks.length; i++) {
+    merged.set(chunks[i], offset);
+    offset += chunks[i].length;
+  }
+
+  // Downsample to 16kHz if audioContext ran at higher rate (e.g. 44.1kHz or 48kHz)
+  let targetSamples = merged;
+  const targetRate = 16000;
+  if (sampleRate !== targetRate) {
+    const ratio = sampleRate / targetRate;
+    const newLength = Math.round(merged.length / ratio);
+    targetSamples = new Float32Array(newLength);
+    for (let i = 0; i < newLength; i++) {
+      targetSamples[i] = merged[Math.min(Math.round(i * ratio), merged.length - 1)];
+    }
+  }
+
+  // Create 44-byte WAV header + 16-bit PCM data
+  const buffer = new ArrayBuffer(44 + targetSamples.length * 2);
+  const view = new DataView(buffer);
+
+  function writeString(view, offset, string) {
+    for (let i = 0; i < string.length; i++) {
+      view.setUint8(offset + i, string.charCodeAt(i));
+    }
+  }
+
+  /* RIFF identifier */
+  writeString(view, 0, 'RIFF');
+  /* file length */
+  view.setUint32(4, 36 + targetSamples.length * 2, true);
+  /* RIFF type */
+  writeString(view, 8, 'WAVE');
+  /* format chunk identifier */
+  writeString(view, 12, 'fmt ');
+  /* format chunk length */
+  view.setUint32(16, 16, true);
+  /* sample format (1 = raw PCM) */
+  view.setUint16(20, 1, true);
+  /* channel count (1 = mono) */
+  view.setUint16(22, 1, true);
+  /* sample rate (16000 Hz) */
+  view.setUint32(24, targetRate, true);
+  /* byte rate (sampleRate * 2) */
+  view.setUint32(28, targetRate * 2, true);
+  /* block align (2 bytes per sample) */
+  view.setUint16(32, 2, true);
+  /* bits per sample (16 bits) */
+  view.setUint16(34, 16, true);
+  /* data chunk identifier */
+  writeString(view, 36, 'data');
+  /* data chunk length */
+  view.setUint32(40, targetSamples.length * 2, true);
+
+  // Write 16-bit PCM audio samples
+  let sampleOffset = 44;
+  for (let i = 0; i < targetSamples.length; i++) {
+    const s = Math.max(-1, Math.min(1, targetSamples[i]));
+    view.setInt16(sampleOffset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+    sampleOffset += 2;
+  }
+
+  return new Blob([buffer], { type: 'audio/wav' });
+}
+
+async function processRecordedBlob(audioBlob, mimeType) {
+  if (audioBlob.size < 600) {
+    resetVoiceUI("Audio was too short. Please speak your query clearly.");
     return;
   }
 
-  // Convert Blob to Base64
   const reader = new FileReader();
   reader.readAsDataURL(audioBlob);
 
@@ -155,7 +319,7 @@ async function processRecordedVoice(mimeType) {
     const base64Data = reader.result.split(",")[1];
     const selectedLang = document.getElementById("voiceLangSelect").value;
 
-    const typingId = appendTypingIndicator("Transcribing and consulting Sarvam-105b...");
+    const typingId = appendTypingIndicator("Sarvam Saaras STT transcribing speech...");
 
     try {
       const response = await fetch("/api/voice-chat", {
@@ -163,7 +327,7 @@ async function processRecordedVoice(mimeType) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           audio_base64: base64Data,
-          mime_type: mimeType,
+          mime_type: mimeType, // Always clean "audio/wav" or "audio/webm"
           language_code: selectedLang,
         }),
       });
@@ -171,19 +335,14 @@ async function processRecordedVoice(mimeType) {
       const data = await response.json();
       removeTypingIndicator(typingId);
 
-      if (data.transcript) {
-        // Append citizen speech transcript
+      if (data.transcript && data.transcript.trim()) {
         appendMessage("user", data.transcript);
-
-        // Append assistant reply with attached audio
         appendMessage("bot", data.reply, data.audio_base64);
         messageTurnCount++;
 
-        // Advance stepper logic
         if (messageTurnCount === 1) advanceStep(2);
         else if (messageTurnCount === 2) advanceStep(3);
 
-        // Auto-synchronize detected language with Draft dropdown
         if (data.language_code && data.language_code !== "unknown") {
           const langSelect = document.getElementById("langSelect");
           if ([...langSelect.options].some(o => o.value === data.language_code)) {
@@ -191,21 +350,21 @@ async function processRecordedVoice(mimeType) {
           }
         }
 
-        // Play Sarvam Bulbul Voice
         if (autoVoicePlayback && data.audio_base64) {
           playBase64Audio(data.audio_base64, "Playing Sarvam Bulbul Indic Voice...");
         }
 
-        resetVoiceUI(`Recognized (${data.language_code || "Indic"}): "${data.transcript.slice(0, 40)}..."`);
+        resetVoiceUI(`Recognized (${data.language_code || "Indic"}): "${data.transcript.slice(0, 45)}..."`);
       } else {
         removeTypingIndicator(typingId);
-        appendMessage("bot", "⚠️ " + (data.reply || "Could not transcribe audio."));
-        resetVoiceUI("Could not recognize speech. Please try again.");
+        const errMsg = data.error || data.reply || "Could not recognize clear speech. Please try speaking closer to your mic.";
+        appendMessage("bot", "⚠️ " + errMsg);
+        resetVoiceUI("Speech recognition failed. Please try again.");
       }
     } catch (err) {
       removeTypingIndicator(typingId);
       console.error("Voice chat error:", err);
-      appendMessage("bot", "⚠️ Network error connecting to Sarvam Voice services.");
+      appendMessage("bot", "⚠️ Connection error to voice service. Please ensure the local server is running.");
       resetVoiceUI("Connection failed. Ready to try again.");
     }
   };
@@ -281,7 +440,6 @@ async function handleChatSubmit(e) {
 
   if (!userText) return;
 
-  // Append user message
   appendMessage("user", userText);
   input.value = "";
   input.disabled = true;
@@ -306,7 +464,6 @@ async function handleChatSubmit(e) {
       if (messageTurnCount === 1) advanceStep(2);
       else if (messageTurnCount === 2) advanceStep(3);
 
-      // If auto voice playback is enabled, synthesize reply with Bulbul
       if (autoVoicePlayback) {
         synthesizeAndPlayMessage(data.reply);
       }

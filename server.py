@@ -143,7 +143,9 @@ class RTIRequestHandler(BaseHTTPRequestHandler):
                 result = copilot_instance.voice_chat(audio_bytes, mime_type, language_code)
                 self._send_json(result)
             except Exception as e:
-                self._send_json({"error": str(e)}, status=500)
+                import traceback
+                traceback.print_exc()
+                self._send_json({"error": str(e), "reply": f"Transcription error: {str(e)}"}, status=200)
 
         elif parsed.path == "/api/tts":
             # Text-to-Speech via Sarvam Bulbul
