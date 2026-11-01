@@ -122,63 +122,83 @@ st.markdown("""
   }
 
   /* ── GLOWING VOICE ORB HERO ───────────────────────────── */
-  .orb-section {
+  .orb-hero-container {
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 1.75rem 1rem 1.25rem;
-    margin-bottom: 1rem;
-    background: radial-gradient(ellipse at 50% 0%, rgba(99,102,241,0.12) 0%, transparent 70%);
+    justify-content: center;
+    padding: 1.5rem 1rem 0.5rem;
+    margin-bottom: 0.5rem;
+    background: radial-gradient(ellipse at 50% 0%, rgba(99,102,241,0.15) 0%, transparent 70%);
     border-bottom: 1px solid var(--border);
     border-radius: 14px;
-  }
-  .orb-wrap {
     position: relative;
-    width: 120px;
-    height: 120px;
+  }
+  .orb-pulse-rings {
+    position: relative;
+    width: 140px;
+    height: 140px;
     display: flex;
     align-items: center;
     justify-content: center;
+    pointer-events: none !important;
   }
   .orb-ring {
     position: absolute;
     border-radius: 50%;
-    border: 1px solid rgba(99,102,241,0.25);
+    border: 1px solid rgba(99,102,241,0.3);
     animation: ringPulse 3s ease-in-out infinite;
+    pointer-events: none !important;
   }
-  .ring-1 { width: 130px; height: 130px; animation-delay: 0s; }
-  .ring-2 { width: 155px; height: 155px; animation-delay: 0.4s; opacity: 0.6; }
+  .ring-1 { width: 120px; height: 120px; animation-delay: 0s; }
+  .ring-2 { width: 150px; height: 150px; animation-delay: 0.4s; opacity: 0.6; }
   .ring-3 { width: 180px; height: 180px; animation-delay: 0.8s; opacity: 0.3; }
 
   @keyframes ringPulse {
     0%, 100% { transform: scale(1); opacity: inherit; }
-    50% { transform: scale(1.05); opacity: 0.15; }
+    50% { transform: scale(1.06); opacity: 0.15; }
   }
 
-  .orb-core {
-    position: relative;
-    z-index: 2;
-    width: 96px;
-    height: 96px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, #6366f1, #8b5cf6, #a855f7);
-    box-shadow: 0 0 50px rgba(99,102,241,0.5), 0 0 100px rgba(139,92,246,0.25);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: white;
-    font-size: 2rem;
-    animation: orbFloat 3s ease-in-out infinite;
+  /* Style stAudioInput so its button IS the clickable Glowing Voice Orb */
+  div[data-testid="stAudioInput"] {
+    background: transparent !important;
+    border: none !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    margin-top: -125px !important;
+    position: relative !important;
+    z-index: 20 !important;
+    pointer-events: auto !important;
   }
-  @keyframes orbFloat {
-    0%, 100% { transform: translateY(0); }
-    50% { transform: translateY(-3px); }
+  div[data-testid="stAudioInput"] label {
+    font-size: 0.82rem !important;
+    color: var(--text-secondary) !important;
+    text-align: center !important;
+    margin-top: 1rem !important;
   }
-  .orb-hint {
-    font-size: 0.82rem;
-    color: var(--text-secondary);
-    margin-top: 1rem;
-    text-align: center;
+  div[data-testid="stAudioInput"] button {
+    width: 86px !important;
+    height: 86px !important;
+    min-width: 86px !important;
+    min-height: 86px !important;
+    border-radius: 50% !important;
+    background: linear-gradient(135deg, #6366f1, #8b5cf6, #a855f7) !important;
+    box-shadow: 0 0 50px rgba(99,102,241,0.65), 0 0 100px rgba(139,92,246,0.35) !important;
+    border: 2px solid rgba(255,255,255,0.3) !important;
+    cursor: pointer !important;
+    pointer-events: auto !important;
+    transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s !important;
+  }
+  div[data-testid="stAudioInput"] button:hover {
+    transform: scale(1.08) !important;
+    box-shadow: 0 0 70px rgba(99,102,241,0.9), 0 0 130px rgba(139,92,246,0.5) !important;
+  }
+  div[data-testid="stAudioInput"] button svg {
+    width: 36px !important;
+    height: 36px !important;
+    fill: white !important;
   }
 
   /* ── READINESS TRACKER ───────────────────────────────── */
@@ -408,25 +428,23 @@ with col_chat:
 
     # Glowing Voice Orb Hero Component
     st.markdown("""
-    <div class="orb-section">
-      <div class="orb-wrap">
+    <div class="orb-hero-container">
+      <div class="orb-pulse-rings">
         <div class="orb-ring ring-3"></div>
         <div class="orb-ring ring-2"></div>
         <div class="orb-ring ring-1"></div>
-        <div class="orb-core">
-          🎙️
-        </div>
       </div>
-      <div class="orb-hint">Tap microphone below to record in any Indian regional language</div>
     </div>
     """, unsafe_allow_html=True)
 
-    # Native Streamlit audio recorder
+    # Native Clickable Streamlit Audio Recorder (Styled directly as the glowing orb)
     if hasattr(st, "audio_input"):
-        audio_val = st.audio_input("Record voice query:", label_visibility="collapsed")
+        audio_val = st.audio_input("Tap the glowing orb to speak · tap again to submit", key="voice_recorder")
         if audio_val is not None:
             audio_bytes = audio_val.read()
-            if audio_bytes and len(audio_bytes) > 800:
+            audio_hash = hash(audio_bytes) if audio_bytes else 0
+            if audio_bytes and len(audio_bytes) > 600 and audio_hash != st.session_state.get("last_audio_hash"):
+                st.session_state["last_audio_hash"] = audio_hash
                 with st.spinner("⚡ Transcribing speech with Sarvam Saaras STT..."):
                     res = copilot.voice_chat(audio_bytes, mime_type="audio/wav", language_code=voice_lang)
                     if res.get("transcript"):
@@ -437,6 +455,31 @@ with col_chat:
                             "audio": res.get("audio_base64")
                         })
                         st.rerun()
+
+    # Audio file upload fallback
+    with st.expander("📁 Or upload an audio recording file"):
+        uploaded_audio = st.file_uploader(
+            "Upload audio file (.wav, .mp3, .m4a, .webm):",
+            type=["wav", "mp3", "m4a", "webm", "ogg"],
+            label_visibility="collapsed"
+        )
+        if uploaded_audio is not None:
+            up_bytes = uploaded_audio.read()
+            up_hash = hash(up_bytes) if up_bytes else 0
+            if up_bytes and len(up_bytes) > 600 and up_hash != st.session_state.get("last_upload_hash"):
+                if st.button("Transcribe & Submit Audio File", type="primary"):
+                    st.session_state["last_upload_hash"] = up_hash
+                    with st.spinner("⚡ Transcribing file with Sarvam Saaras..."):
+                        mime = uploaded_audio.type or "audio/wav"
+                        res = copilot.voice_chat(up_bytes, mime_type=mime, language_code=voice_lang)
+                        if res.get("transcript"):
+                            st.session_state.chat_history.append({"role": "user", "content": res["transcript"]})
+                            st.session_state.chat_history.append({
+                                "role": "assistant",
+                                "content": res["reply"],
+                                "audio": res.get("audio_base64")
+                            })
+                            st.rerun()
 
     # Chat Messages Box
     chat_container = st.container(height=360)
