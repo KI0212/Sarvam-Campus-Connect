@@ -8,7 +8,7 @@ import os
 import io
 import base64
 import streamlit as st
-from config import SUPPORTED_LANGUAGES
+from config import SUPPORTED_LANGUAGES, get_api_key
 from copilot import RTICopilot
 
 # Streamlit Page Config
@@ -43,6 +43,45 @@ st.markdown("""
   .badge-pending { background: rgba(255,255,255,0.05); color: #888; border: 1px solid #333; }
 </style>
 """, unsafe_allow_html=True)
+
+# Check API Key before initializing
+api_key = get_api_key()
+if not api_key:
+    st.title("⚖️ RTI Copilot — Sarvam AI")
+    st.warning("⚠️ **Sarvam AI API Key Required**")
+    st.markdown("""
+    To start using **RTI Copilot**, please provide your Sarvam API Key.
+    
+    You can paste it below to use immediately, or save it permanently in your Streamlit Cloud Secrets.
+    """)
+    
+    user_key = st.text_input(
+        "Enter your SARVAM_API_KEY:",
+        type="password",
+        placeholder="sk_...",
+        help="Get your key from https://dashboard.sarvam.ai"
+    )
+    if st.button("Save & Launch Copilot", type="primary"):
+        if user_key and user_key.strip():
+            clean_key = user_key.strip().strip("'\"")
+            os.environ["SARVAM_API_KEY"] = clean_key
+            st.session_state.copilot = RTICopilot()
+            st.rerun()
+        else:
+            st.error("Please enter a valid API key.")
+
+    with st.expander("📌 How to save it permanently in Streamlit Cloud (Recommended)"):
+        st.markdown("""
+        1. In the bottom-right corner of your Streamlit app, click **Manage app**.
+        2. Click the three dots **⋮** → **Settings**.
+        3. Select the **Secrets** tab.
+        4. Paste your key:
+        ```toml
+        SARVAM_API_KEY = "your_actual_sarvam_api_key_here"
+        ```
+        5. Click **Save** — the app will refresh and unlock automatically!
+        """)
+    st.stop()
 
 # Initialize Session State
 if "copilot" not in st.session_state:
