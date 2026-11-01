@@ -1,96 +1,109 @@
 /**
- * RTI COPILOT — Ultra-Reliable Voice-First Accessible Frontend Client
- * Powered by Sarvam AI:
- * - Speech-to-Text: Saaras v3 (multilingual regional transcription & auto language detection)
- * - Text-to-Speech: Bulbul v3 (11 official Indic regional voices)
- * - Conversational Engine: sarvam-105b-conversations
- * 
- * Features:
- * - Pure 16kHz PCM WAV Audio Encoder via Web Audio API (100% reliable for Sarvam Saaras)
- * - MediaRecorder fallback with cleaned MIME types
- * - Live microphone level visualizer
+ * RTI Copilot — Voice-First Frontend
+ * Sarvam AI: Saaras v3 STT · Bulbul v3 TTS · sarvam-105b-conversations
+ *
+ * Voice pipeline (batch REST):
+ *   mic → 16kHz PCM WAV → POST /api/voice-chat → {transcript, reply, audio_base64}
+ * Text pipeline:
+ *   textarea → POST /api/chat → {reply} → TTS POST /api/tts → play
  */
 
-// State Management
-let currentDraftText = "";
+/* ── STATE ──────────────────────────────────────────────── */
 let autoVoicePlayback = true;
-let messageTurnCount = 0;
+let isRecording       = false;
+let isProcessing      = false;
+let isSpeaking        = false;
+let currentAudio      = null;
+let currentDraft      = '';
 
-// Web Audio WAV Recording State
-let audioContext = null;
-let mediaStream = null;
-let scriptProcessor = null;
-let audioInputNode = null;
-let pcmSamples = [];
-let isRecording = false;
-let currentAudioElement = null;
+// Web Audio recording state
+let audioCtx      = null;
+let mediaStream   = null;
+let sourceNode    = null;
+let processorNode = null;
+let pcmChunks     = [];
 
-// Fallback MediaRecorder State
-let mediaRecorder = null;
-let fallbackChunks = [];
+/* ── INIT ────────────────────────────────────────────────── */
+document.addEventListener('DOMContentLoaded', () => {
+  // Restore preferences
+  const savedTheme = localStorage.getItem('rti_theme') || 'dark';
+  const savedSize  = localStorage.getItem('rti_font_size') || 'normal';
+  applyTheme(savedTheme);
+  applyFontSize(savedSize);
 
-// Initialize on DOM ready
-document.addEventListener("DOMContentLoaded", () => {
-  const savedFont = localStorage.getItem("rti_font_size") || "normal";
-  const savedTheme = localStorage.getItem("rti_theme") || "light";
-  setFontSize(savedFont);
-  setTheme(savedTheme);
-
-  loadGroundedDocuments();
+  loadDocuments();
 });
 
-/* ==========================================================================
-   ACCESSIBILITY: FONT SIZE & THEME CONTROLS
-   ========================================================================== */
+/* ── THEME & FONT ────────────────────────────────────────── */
+function setTheme(t)    { applyTheme(t); localStorage.setItem('rti_theme', t); }
+function setFontSize(s) { applyFontSize(s); localStorage.setItem('rti_font_size', s); }
 
-function setFontSize(size) {
-  document.body.setAttribute("data-font-size", size);
-  localStorage.setItem("rti_font_size", size);
-
-  document.getElementById("btnFontNormal").setAttribute("aria-pressed", size === "normal");
-  document.getElementById("btnFontLarge").setAttribute("aria-pressed", size === "large");
-  document.getElementById("btnFontXLarge").setAttribute("aria-pressed", size === "xlarge");
+function applyTheme(t) {
+  document.body.setAttribute('data-theme', t);
+  ['btnThemeLight','btnThemeDark','btnThemeHC'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.setAttribute('aria-pressed', 'false');
+  });
+  const map = { light: 'btnThemeLight', dark: 'btnThemeDark', 'high-contrast': 'btnThemeHC' };
+  const el = document.getElementById(map[t]);
+  if (el) { el.setAttribute('aria-pressed', 'true'); el.classList.add('active'); }
+  Object.values(map).forEach(id => {
+    const b = document.getElementById(id);
+    if (b && id !== map[t]) b.classList.remove('active');
+  });
 }
 
-function setTheme(theme) {
-  document.body.setAttribute("data-theme", theme);
-  localStorage.setItem("rti_theme", theme);
-
-  document.getElementById("btnThemeDefault").setAttribute("aria-pressed", theme === "light");
-  document.getElementById("btnThemeHighContrast").setAttribute("aria-pressed", theme === "high-contrast");
-  document.getElementById("btnThemeDark").setAttribute("aria-pressed", theme === "dark");
+function applyFontSize(s) {
+  document.body.setAttribute('data-font-size', s);
+  ['btnFontNormal','btnFontLarge','btnFontXLarge'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.setAttribute('aria-pressed', 'false'); el.classList.remove('active'); }
+  });
+  const map = { normal:'btnFontNormal', large:'btnFontLarge', xlarge:'btnFontXLarge' };
+  const el = document.getElementById(map[s]);
+  if (el) { el.setAttribute('aria-pressed', 'true'); el.classList.add('active'); }
 }
 
+/* ── AUTO VOICE TOGGLE ───────────────────────────────────── */
 function toggleAutoVoice() {
   autoVoicePlayback = !autoVoicePlayback;
-  const statusEl = document.getElementById("autoVoiceStatus");
-  statusEl.textContent = autoVoicePlayback ? "Enabled" : "Muted";
-  document.getElementById("btnAutoPlayVoice").setAttribute("aria-pressed", autoVoicePlayback);
-  document.getElementById("btnAutoPlayVoice").classList.toggle("active", autoVoicePlayback);
+  const btn  = document.getElementById('btnAutoVoice');
+  const dot  = document.getElementById('voiceDot');
+  btn.setAttribute('aria-pressed', String(autoVoicePlayback));
+  if (dot) dot.classList.toggle('active', autoVoicePlayback);
+  if (!autoVoicePlayback) stopAudio();
+}
 
-  if (!autoVoicePlayback) {
-    stopAudioPlayback();
+/* ── RESET ───────────────────────────────────────────────── */
+function confirmReset() {
+  if (confirm('Reset this session? The conversation and draft will be cleared.')) {
+    fetch('/api/reset', { method: 'POST' })
+      .then(() => {
+        document.getElementById('chatMessages').innerHTML = `
+          <div class="msg assistant">
+            <div class="msg-avatar" aria-hidden="true">🏛</div>
+            <div class="msg-bubble">
+              <p>Session reset. How can I help you draft your RTI application?</p>
+            </div>
+          </div>`;
+        clearDraft();
+        stopAudio();
+      })
+      .catch(err => console.error('Reset failed:', err));
   }
 }
 
-/* ==========================================================================
-   HIGH-FIDELITY 16kHz PCM WAV RECORDER (Web Audio API)
-   Generates standard, uncompressed 16kHz mono WAV for Sarvam Saaras STT
-   ========================================================================== */
-
-async function toggleVoiceRecording() {
-  if (isRecording) {
-    stopVoiceRecording();
-  } else {
-    startVoiceRecording();
-  }
+/* ── VOICE RECORDING ─────────────────────────────────────── */
+async function toggleVoice() {
+  if (isSpeaking) { stopAudio(); return; }
+  if (isRecording) { stopRecording(); return; }
+  if (isProcessing) return;
+  await startRecording();
 }
 
-async function startVoiceRecording() {
-  stopAudioPlayback();
-
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    alert("Microphone recording is not supported in this browser. Please use Chrome, Edge, Firefox, or Safari.");
+async function startRecording() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    showAlert('Your browser does not support microphone access. Please use Chrome, Edge, Firefox, or Safari.');
     return;
   }
 
@@ -101,714 +114,530 @@ async function startVoiceRecording() {
         sampleRate: { ideal: 16000 },
         echoCancellation: true,
         noiseSuppression: true,
+        autoGainControl: true,
       }
     });
-
-    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-    if (AudioContextClass) {
-      // Primary Route: Web Audio API PCM Recording (16kHz WAV)
-      audioContext = new AudioContextClass({ sampleRate: 16000 });
-      if (audioContext.state === "suspended") {
-        await audioContext.resume();
-      }
-
-      audioInputNode = audioContext.createMediaStreamSource(mediaStream);
-      // Buffer size 4096, 1 input channel, 1 output channel
-      scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
-      pcmSamples = [];
-
-      scriptProcessor.onaudioprocess = (e) => {
-        if (!isRecording) return;
-        const inputData = e.inputBuffer.getChannelData(0);
-        // Copy float samples
-        pcmSamples.push(new Float32Array(inputData));
-
-        // Update live volume visual feedback
-        let sum = 0;
-        for (let i = 0; i < inputData.length; i += 16) {
-          sum += inputData[i] * inputData[i];
-        }
-        const rms = Math.sqrt(sum / (inputData.length / 16));
-        updateMicVisualFeedback(rms);
-      };
-
-      audioInputNode.connect(scriptProcessor);
-      scriptProcessor.connect(audioContext.destination);
-
-    } else {
-      // Fallback Route: MediaRecorder
-      startMediaRecorderFallback(mediaStream);
-    }
-
-    isRecording = true;
-
-    // Update UI for recording state
-    const btn = document.getElementById("btnVoiceRecord");
-    btn.classList.add("recording");
-    document.getElementById("voiceMicIcon").textContent = "⏹";
-    document.getElementById("voiceBtnLabel").textContent = "Stop & Submit";
-    document.getElementById("voiceStatusText").innerHTML = "🔴 <strong>Listening...</strong> Speak your RTI query clearly in any regional language.";
-
   } catch (err) {
-    console.error("Microphone access error:", err);
-    alert("Could not access microphone: " + (err.message || "Permission denied."));
-  }
-}
-
-function updateMicVisualFeedback(rms) {
-  const pulseRing = document.getElementById("voicePulseRing");
-  if (pulseRing && isRecording) {
-    const scale = Math.min(1.8, 1 + rms * 3.5);
-    pulseRing.style.transform = `scale(${scale})`;
-    pulseRing.style.opacity = Math.min(1, 0.4 + rms * 2);
-  }
-}
-
-function startMediaRecorderFallback(stream) {
-  let mimeType = "audio/webm";
-  if (MediaRecorder.isTypeSupported("audio/webm")) {
-    mimeType = "audio/webm";
-  } else if (MediaRecorder.isTypeSupported("audio/mp4")) {
-    mimeType = "audio/mp4";
+    showAlert(`Microphone access denied: ${err.message || 'Permission denied.'}`);
+    return;
   }
 
-  fallbackChunks = [];
-  mediaRecorder = new MediaRecorder(stream, { mimeType });
-  mediaRecorder.ondataavailable = (e) => {
-    if (e.data.size > 0) fallbackChunks.push(e.data);
+  const AudioCtxClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtxClass) {
+    showAlert('Web Audio API not available. Please use a modern browser.');
+    mediaStream.getTracks().forEach(t => t.stop());
+    return;
+  }
+
+  audioCtx = new AudioCtxClass({ sampleRate: 16000 });
+  if (audioCtx.state === 'suspended') await audioCtx.resume();
+
+  sourceNode    = audioCtx.createMediaStreamSource(mediaStream);
+  processorNode = audioCtx.createScriptProcessor(4096, 1, 1);
+  pcmChunks     = [];
+
+  processorNode.onaudioprocess = e => {
+    if (!isRecording) return;
+    const data = e.inputBuffer.getChannelData(0);
+    pcmChunks.push(new Float32Array(data));
+    // Update level bar
+    let sum = 0;
+    for (let i = 0; i < data.length; i += 8) sum += data[i] * data[i];
+    const rms = Math.sqrt(sum / (data.length / 8));
+    setLevelBar(Math.min(100, rms * 300));
   };
-  mediaRecorder.start(250);
+
+  sourceNode.connect(processorNode);
+  processorNode.connect(audioCtx.destination);
+  isRecording = true;
+
+  setOrbState('recording');
+  setHint('🔴 Listening… speak your RTI query');
 }
 
-function stopVoiceRecording() {
+function stopRecording() {
   if (!isRecording) return;
   isRecording = false;
 
-  const btn = document.getElementById("btnVoiceRecord");
-  btn.classList.remove("recording");
-  document.getElementById("voiceMicIcon").textContent = "⏳";
-  document.getElementById("voiceBtnLabel").textContent = "Processing...";
-  document.getElementById("voiceStatusText").textContent = "⚡ Transcribing speech with Sarvam Saaras STT...";
+  // Disconnect Web Audio nodes
+  try { sourceNode?.disconnect(); processorNode?.disconnect(); } catch (_) {}
+  mediaStream?.getTracks().forEach(t => t.stop());
+  setLevelBar(0);
 
-  // Reset pulse ring
-  const pulseRing = document.getElementById("voicePulseRing");
-  if (pulseRing) {
-    pulseRing.style.transform = "scale(1)";
-    pulseRing.style.opacity = "0";
-  }
-
-  // Stop Web Audio processing
-  if (scriptProcessor && audioInputNode) {
-    try {
-      audioInputNode.disconnect();
-      scriptProcessor.disconnect();
-    } catch (e) {}
-  }
-
-  // Stop MediaStream tracks
-  if (mediaStream) {
-    mediaStream.getTracks().forEach(track => track.stop());
-  }
-
-  // Process gathered audio
-  if (pcmSamples && pcmSamples.length > 0) {
-    const wavBlob = encodePCMToWav(pcmSamples, audioContext ? audioContext.sampleRate : 16000);
-    if (audioContext) {
-      audioContext.close().catch(() => {});
-    }
-    processRecordedBlob(wavBlob, "audio/wav");
-  } else if (mediaRecorder) {
-    mediaRecorder.onstop = () => {
-      const blob = new Blob(fallbackChunks, { type: "audio/webm" });
-      processRecordedBlob(blob, "audio/webm");
-    };
-    mediaRecorder.stop();
-  } else {
-    resetVoiceUI("No audio was recorded. Please try speaking again.");
-  }
-}
-
-/**
- * Encodes raw PCM float32 samples into 16-bit PCM WAV (16kHz mono)
- */
-function encodePCMToWav(chunks, sampleRate) {
-  // Calculate total samples
-  let totalLength = 0;
-  for (let i = 0; i < chunks.length; i++) {
-    totalLength += chunks[i].length;
-  }
-
-  // Merge float32 arrays
-  const merged = new Float32Array(totalLength);
-  let offset = 0;
-  for (let i = 0; i < chunks.length; i++) {
-    merged.set(chunks[i], offset);
-    offset += chunks[i].length;
-  }
-
-  // Downsample to 16kHz if audioContext ran at higher rate (e.g. 44.1kHz or 48kHz)
-  let targetSamples = merged;
-  const targetRate = 16000;
-  if (sampleRate !== targetRate) {
-    const ratio = sampleRate / targetRate;
-    const newLength = Math.round(merged.length / ratio);
-    targetSamples = new Float32Array(newLength);
-    for (let i = 0; i < newLength; i++) {
-      targetSamples[i] = merged[Math.min(Math.round(i * ratio), merged.length - 1)];
-    }
-  }
-
-  // Create 44-byte WAV header + 16-bit PCM data
-  const buffer = new ArrayBuffer(44 + targetSamples.length * 2);
-  const view = new DataView(buffer);
-
-  function writeString(view, offset, string) {
-    for (let i = 0; i < string.length; i++) {
-      view.setUint8(offset + i, string.charCodeAt(i));
-    }
-  }
-
-  /* RIFF identifier */
-  writeString(view, 0, 'RIFF');
-  /* file length */
-  view.setUint32(4, 36 + targetSamples.length * 2, true);
-  /* RIFF type */
-  writeString(view, 8, 'WAVE');
-  /* format chunk identifier */
-  writeString(view, 12, 'fmt ');
-  /* format chunk length */
-  view.setUint32(16, 16, true);
-  /* sample format (1 = raw PCM) */
-  view.setUint16(20, 1, true);
-  /* channel count (1 = mono) */
-  view.setUint16(22, 1, true);
-  /* sample rate (16000 Hz) */
-  view.setUint32(24, targetRate, true);
-  /* byte rate (sampleRate * 2) */
-  view.setUint32(28, targetRate * 2, true);
-  /* block align (2 bytes per sample) */
-  view.setUint16(32, 2, true);
-  /* bits per sample (16 bits) */
-  view.setUint16(34, 16, true);
-  /* data chunk identifier */
-  writeString(view, 36, 'data');
-  /* data chunk length */
-  view.setUint32(40, targetSamples.length * 2, true);
-
-  // Write 16-bit PCM audio samples
-  let sampleOffset = 44;
-  for (let i = 0; i < targetSamples.length; i++) {
-    const s = Math.max(-1, Math.min(1, targetSamples[i]));
-    view.setInt16(sampleOffset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
-    sampleOffset += 2;
-  }
-
-  return new Blob([buffer], { type: 'audio/wav' });
-}
-
-async function processRecordedBlob(audioBlob, mimeType) {
-  if (audioBlob.size < 600) {
-    resetVoiceUI("Audio was too short. Please speak your query clearly.");
+  if (pcmChunks.length === 0) {
+    resetOrb();
+    setHint('No audio captured. Please try again.');
     return;
   }
 
-  const reader = new FileReader();
-  reader.readAsDataURL(audioBlob);
-
-  reader.onloadend = async () => {
-    const base64Data = reader.result.split(",")[1];
-    const selectedLang = document.getElementById("voiceLangSelect").value;
-
-    const typingId = appendTypingIndicator("Sarvam Saaras STT transcribing speech...");
-
-    try {
-      const response = await fetch("/api/voice-chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          audio_base64: base64Data,
-          mime_type: mimeType, // Always clean "audio/wav" or "audio/webm"
-          language_code: selectedLang,
-        }),
-      });
-
-      const data = await response.json();
-      removeTypingIndicator(typingId);
-
-      if (data.transcript && data.transcript.trim()) {
-        appendMessage("user", data.transcript);
-        appendMessage("bot", data.reply, data.audio_base64);
-        messageTurnCount++;
-
-        if (messageTurnCount === 1) advanceStep(2);
-        else if (messageTurnCount === 2) advanceStep(3);
-
-        if (data.language_code && data.language_code !== "unknown") {
-          const langSelect = document.getElementById("langSelect");
-          if ([...langSelect.options].some(o => o.value === data.language_code)) {
-            langSelect.value = data.language_code;
-          }
-        }
-
-        if (autoVoicePlayback && data.audio_base64) {
-          playBase64Audio(data.audio_base64, "Playing Sarvam Bulbul Indic Voice...");
-        }
-
-        resetVoiceUI(`Recognized (${data.language_code || "Indic"}): "${data.transcript.slice(0, 45)}..."`);
-      } else {
-        removeTypingIndicator(typingId);
-        const errMsg = data.error || data.reply || "Could not recognize clear speech. Please try speaking closer to your mic.";
-        appendMessage("bot", "⚠️ " + errMsg);
-        resetVoiceUI("Speech recognition failed. Please try again.");
-      }
-    } catch (err) {
-      removeTypingIndicator(typingId);
-      console.error("Voice chat error:", err);
-      appendMessage("bot", "⚠️ Connection error to voice service. Please ensure the local server is running.");
-      resetVoiceUI("Connection failed. Ready to try again.");
-    }
-  };
+  const wavBlob = encodeWav(pcmChunks, audioCtx?.sampleRate || 16000);
+  audioCtx?.close().catch(() => {});
+  submitAudio(wavBlob);
 }
 
-function resetVoiceUI(statusMsg) {
-  const btn = document.getElementById("btnVoiceRecord");
-  btn.classList.remove("recording");
-  document.getElementById("voiceMicIcon").textContent = "🎙️";
-  document.getElementById("voiceBtnLabel").textContent = "Tap to Speak";
-  document.getElementById("voiceStatusText").textContent = statusMsg || "Ready to listen in all Indian regional languages.";
-}
+/* ── AUDIO SUBMISSION ────────────────────────────────────── */
+async function submitAudio(blob) {
+  isProcessing = true;
+  setOrbState('processing');
+  setHint('⚡ Transcribing with Sarvam Saaras…');
+  addLoadingBubble('user-loading');
 
-function playBase64Audio(base64Audio, label) {
-  stopAudioPlayback();
+  const lang = document.getElementById('voiceLang')?.value || 'unknown';
 
   try {
-    currentAudioElement = new Audio("data:audio/wav;base64," + base64Audio);
-    const playbackBar = document.getElementById("voicePlaybackBar");
-    const statusText = document.getElementById("playbackStatus");
-    
-    playbackBar.style.display = "flex";
-    statusText.textContent = label || "Speaking response via Sarvam Bulbul...";
+    const arrayBuf = await blob.arrayBuffer();
+    const b64      = bufToBase64(arrayBuf);
 
-    currentAudioElement.onended = () => {
-      playbackBar.style.display = "none";
-      currentAudioElement = null;
-    };
-
-    currentAudioElement.onerror = (e) => {
-      console.error("Audio playback error:", e);
-      playbackBar.style.display = "none";
-      currentAudioElement = null;
-    };
-
-    currentAudioElement.play();
-  } catch (err) {
-    console.error("Audio error:", err);
-  }
-}
-
-function stopAudioPlayback() {
-  if (currentAudioElement) {
-    currentAudioElement.pause();
-    currentAudioElement = null;
-  }
-  document.getElementById("voicePlaybackBar").style.display = "none";
-}
-
-/* ==========================================================================
-   CONVERSATIONAL DIALOGUE (TEXT INPUT)
-   ========================================================================== */
-
-function handleInputKeydown(e) {
-  if (e.key === "Enter" && !e.shiftKey) {
-    e.preventDefault();
-    handleChatSubmit(e);
-  }
-}
-
-function handleQuickPrompt(promptText) {
-  const input = document.getElementById("chatInput");
-  input.value = promptText;
-  handleChatSubmit();
-}
-
-async function handleChatSubmit(e) {
-  if (e && e.preventDefault) e.preventDefault();
-
-  const input = document.getElementById("chatInput");
-  const sendBtn = document.getElementById("btnSend");
-  const userText = input.value.trim();
-
-  if (!userText) return;
-
-  appendMessage("user", userText);
-  input.value = "";
-  input.disabled = true;
-  sendBtn.disabled = true;
-
-  const typingId = appendTypingIndicator("Sarvam-105b is formulating response...");
-
-  try {
-    const response = await fetch("/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: userText }),
+    const res  = await fetch('/api/voice-chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ audio_base64: b64, mime_type: 'audio/wav', language_code: lang })
     });
+    const data = await res.json();
 
-    const data = await response.json();
-    removeTypingIndicator(typingId);
+    removeLoadingBubble('user-loading');
+
+    if (data.error && !data.reply) {
+      addMessage('assistant', `⚠️ ${data.error}`);
+      resetOrb();
+      setHint('Tap to speak in any Indian language');
+      isProcessing = false;
+      return;
+    }
+
+    // Show transcript
+    if (data.transcript) addMessage('user', data.transcript);
+
+    // Show AI reply
+    if (data.reply) {
+      addMessage('assistant', data.reply);
+      if (autoVoicePlayback && data.audio_base64) {
+        await playBase64Audio(data.audio_base64);
+      }
+    }
+
+  } catch (err) {
+    removeLoadingBubble('user-loading');
+    addMessage('assistant', `⚠️ Network error: ${err.message}`);
+  }
+
+  isProcessing = false;
+  resetOrb();
+  setHint('Tap to speak in any Indian language');
+}
+
+/* ── TEXT CHAT ───────────────────────────────────────────── */
+function handleEnterKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendTextMessage(); }
+}
+
+async function sendTextMessage() {
+  const input = document.getElementById('textInput');
+  const text  = input?.value.trim();
+  if (!text) return;
+  input.value = '';
+
+  addMessage('user', text);
+  addLoadingBubble('chat-loading');
+
+  try {
+    const res  = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text })
+    });
+    const data = await res.json();
+
+    removeLoadingBubble('chat-loading');
 
     if (data.reply) {
-      appendMessage("bot", data.reply);
-      messageTurnCount++;
-
-      if (messageTurnCount === 1) advanceStep(2);
-      else if (messageTurnCount === 2) advanceStep(3);
-
+      addMessage('assistant', data.reply);
       if (autoVoicePlayback) {
-        synthesizeAndPlayMessage(data.reply);
+        const lang = document.getElementById('voiceLang')?.value || 'en-IN';
+        playTTS(data.reply, lang);
       }
-    } else {
-      appendMessage("bot", "⚠️ " + (data.error || "An error occurred with Sarvam AI."));
+    } else if (data.error) {
+      addMessage('assistant', `⚠️ ${data.error}`);
     }
   } catch (err) {
-    removeTypingIndicator(typingId);
-    appendMessage("bot", "⚠️ Network error. Please check your internet connection.");
-  } finally {
-    input.disabled = false;
-    sendBtn.disabled = false;
-    input.focus();
+    removeLoadingBubble('chat-loading');
+    addMessage('assistant', `⚠️ ${err.message}`);
   }
 }
 
-async function synthesizeAndPlayMessage(text) {
-  try {
-    const lang = document.getElementById("voiceLangSelect").value;
-    const targetLang = lang === "unknown" ? "en-IN" : lang;
-
-    const res = await fetch("/api/tts", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, language_code: targetLang }),
-    });
-    const data = await res.json();
-    if (data.audio_base64) {
-      playBase64Audio(data.audio_base64, "Playing Sarvam Bulbul Indic Voice...");
-    }
-  } catch (err) {
-    console.error("TTS error:", err);
-  }
-}
-
-function speakSarvamVoice(btn) {
-  const card = btn.closest(".message-card");
-  const cachedAudio = card.getAttribute("data-audio-base64");
-  
-  if (cachedAudio) {
-    playBase64Audio(cachedAudio, "Replaying Sarvam Bulbul Voice...");
-    return;
-  }
-
-  const textEl = card.querySelector(".msg-text");
-  if (textEl) {
-    synthesizeAndPlayMessage(textEl.innerText);
-  }
-}
-
-async function speakFullDraft() {
-  if (!currentDraftText || currentDraftText.startsWith("[No draft")) {
-    alert("Please compile a formal draft first.");
-    return;
-  }
-
-  const lang = document.getElementById("langSelect").value;
-  try {
-    const res = await fetch("/api/tts", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: currentDraftText, language_code: lang }),
-    });
-    const data = await res.json();
-    if (data.audio_base64) {
-      playBase64Audio(data.audio_base64, "Reading formal RTI draft via Sarvam Bulbul...");
-    } else {
-      alert("Audio synthesis for draft completed.");
-    }
-  } catch (e) {
-    alert("Error generating speech for draft.");
-  }
-}
-
-function appendMessage(sender, text, audioBase64 = null) {
-  const container = document.getElementById("chatMessages");
-  const card = document.createElement("div");
-  card.className = `message-card msg-${sender}`;
-  if (audioBase64) {
-    card.setAttribute("data-audio-base64", audioBase64);
-  }
-
-  const isBot = sender === "bot";
-  const avatar = isBot ? "🏛️" : "👤";
-  const speaker = isBot ? "RTI Copilot (Voice Agent)" : "Citizen";
-
-  card.innerHTML = `
-    <div class="msg-avatar" aria-hidden="true">${avatar}</div>
-    <div class="msg-content">
-      <div class="msg-speaker">${speaker}</div>
-      <div class="msg-text">${escapeHtml(text)}</div>
-      ${isBot ? `
-        <div class="msg-actions">
-          <button type="button" class="btn-listen" onclick="speakSarvamVoice(this)" aria-label="Listen using Sarvam Bulbul voice">
-            🔊 Sarvam Voice
-          </button>
-        </div>
-      ` : ""}
-    </div>
-  `;
-
-  container.appendChild(card);
-  container.scrollTop = container.scrollHeight;
-}
-
-function appendTypingIndicator(customLabel) {
-  const container = document.getElementById("chatMessages");
-  const id = "typing-" + Date.now();
-  const card = document.createElement("div");
-  card.id = id;
-  card.className = "message-card msg-bot";
-  card.innerHTML = `
-    <div class="msg-avatar" aria-hidden="true">🏛️</div>
-    <div class="msg-content">
-      <div class="msg-speaker">RTI Copilot</div>
-      <div class="msg-text" style="color: var(--color-text-muted); font-style: italic;">
-        ${customLabel || "Formulating statutory guidance with Sarvam AI..."}
-      </div>
-    </div>
-  `;
-  container.appendChild(card);
-  container.scrollTop = container.scrollHeight;
-  return id;
-}
-
-function removeTypingIndicator(id) {
-  const el = document.getElementById(id);
-  if (el) el.remove();
-}
-
-function escapeHtml(str) {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/\n/g, "<br>");
-}
-
-/* ==========================================================================
-   STATUTORY RTI DRAFTING & REGIONAL TRANSLATION
-   ========================================================================== */
-
+/* ── DRAFT GENERATION ────────────────────────────────────── */
 async function generateDraft() {
-  switchRightTab("draft");
-  setMobileView("draft");
-  advanceStep(4);
-
-  const draftEl = document.getElementById("draftContent");
-  draftEl.textContent = "Synthesizing formal statutory RTI application under Section 6(1) of the RTI Act, 2005...";
+  const lang = document.getElementById('draftLang')?.value || 'en-IN';
+  const btn  = document.querySelector('.compile-btn');
+  if (btn) { btn.textContent = 'Compiling…'; btn.disabled = true; }
 
   try {
-    const lang = document.getElementById("langSelect").value;
-    const response = await fetch("/api/generate-draft", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ language_code: lang }),
+    const res  = await fetch('/api/generate-draft', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ language_code: lang })
     });
+    const data = await res.json();
 
-    const data = await response.json();
     if (data.draft) {
-      currentDraftText = data.draft;
-      draftEl.textContent = data.draft;
-
-      if (autoVoicePlayback) {
-        synthesizeAndPlayMessage("Your formal RTI application draft has been successfully synthesized under the RTI Act, 2005.");
-      }
-    } else {
-      draftEl.textContent = "Error: " + (data.error || "Could not generate draft.");
+      currentDraft = data.draft;
+      showDraft(data.draft);
+    } else if (data.error) {
+      showAlert(`Could not generate draft: ${data.error}`);
     }
   } catch (err) {
-    draftEl.textContent = "Error connecting to server. Please ensure the local server is running.";
+    showAlert(`Draft generation failed: ${err.message}`);
   }
+
+  if (btn) { btn.textContent = ''; btn.disabled = false;
+    btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M12 2v20M2 12h20" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+    </svg> Compile RTI Draft`; }
 }
 
-async function handleLanguageChange() {
-  if (!currentDraftText || currentDraftText.startsWith("[No draft")) return;
-
-  const lang = document.getElementById("langSelect").value;
-  const draftEl = document.getElementById("draftContent");
-  draftEl.textContent = "Translating statutory draft into selected Indic regional language using Sarvam Translation API...";
+async function translateDraft() {
+  if (!currentDraft) { showAlert('Generate a draft first, then translate.'); return; }
+  const lang = document.getElementById('draftLang')?.value || 'hi-IN';
 
   try {
-    const response = await fetch("/api/translate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: currentDraftText, language_code: lang }),
+    const res  = await fetch('/api/translate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: currentDraft, language_code: lang })
     });
-
-    const data = await response.json();
-    if (data.translated_text) {
-      draftEl.textContent = data.translated_text;
-    } else {
-      draftEl.textContent = currentDraftText;
-    }
+    const data = await res.json();
+    if (data.translated_text) showDraft(data.translated_text);
+    else if (data.error) showAlert(`Translation failed: ${data.error}`);
   } catch (err) {
-    draftEl.textContent = currentDraftText;
+    showAlert(`Translation error: ${err.message}`);
   }
 }
 
-function copyDraftToClipboard() {
-  const text = document.getElementById("draftContent").textContent;
-  if (!text || text.startsWith("[No draft")) {
-    alert("Please compile a draft first.");
-    return;
-  }
-  navigator.clipboard.writeText(text).then(() => {
-    alert("Formal RTI Application copied to clipboard!");
-  });
+function showDraft(text) {
+  const placeholder = document.getElementById('draftPlaceholder');
+  const content     = document.getElementById('draftContent');
+  if (placeholder) placeholder.classList.add('hidden');
+  if (content) { content.textContent = text; content.classList.remove('hidden'); }
 }
 
-function downloadDraftFile() {
-  const text = document.getElementById("draftContent").textContent;
-  if (!text || text.startsWith("[No draft")) {
-    alert("Please compile a draft first.");
-    return;
-  }
-  const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "Formal_RTI_Application_Sec6(1).txt";
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+function clearDraft() {
+  currentDraft = '';
+  const placeholder = document.getElementById('draftPlaceholder');
+  const content     = document.getElementById('draftContent');
+  if (placeholder) placeholder.classList.remove('hidden');
+  if (content) { content.textContent = ''; content.classList.add('hidden'); }
+}
+
+/* ── DRAFT ACTIONS ───────────────────────────────────────── */
+function copyDraft() {
+  const text = document.getElementById('draftContent')?.textContent || '';
+  if (!text) { showAlert('No draft to copy yet.'); return; }
+  navigator.clipboard.writeText(text)
+    .then(() => showToast('Draft copied to clipboard ✓'))
+    .catch(() => showAlert('Copy failed. Please select the text manually.'));
+}
+
+function downloadDraft() {
+  const text = document.getElementById('draftContent')?.textContent || '';
+  if (!text) { showAlert('No draft to download yet.'); return; }
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = 'RTI_Application.txt'; a.click();
   URL.revokeObjectURL(url);
 }
 
-/* ==========================================================================
-   GROUNDED OFFICIAL RECORDS
-   ========================================================================== */
+async function speakDraft() {
+  const text = document.getElementById('draftContent')?.textContent || '';
+  if (!text) { showAlert('No draft to read yet.'); return; }
+  const lang = document.getElementById('draftLang')?.value || 'en-IN';
+  await playTTS(text.substring(0, 1000), lang); // Limit first 1000 chars
+}
 
-async function loadGroundedDocuments() {
+/* ── TEXT-TO-SPEECH ──────────────────────────────────────── */
+async function playTTS(text, lang) {
+  if (!autoVoicePlayback || !text) return;
   try {
-    const response = await fetch("/api/documents");
-    const docs = await response.json();
-    
-    document.querySelectorAll(".doc-badge-count").forEach(el => {
-      el.textContent = docs.length;
+    const res  = await fetch('/api/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: text.substring(0, 500), language_code: lang })
     });
-
-    const listEl = document.getElementById("groundedList");
-    listEl.innerHTML = "";
-
-    docs.forEach(doc => {
-      const card = document.createElement("div");
-      card.className = "record-card";
-      card.innerHTML = `
-        <div class="record-header">
-          <div class="record-title">📑 ${escapeHtml(doc.title)}</div>
-        </div>
-        <div class="record-content">${escapeHtml(doc.content)}</div>
-      `;
-      listEl.appendChild(card);
-    });
-  } catch (e) {
-    console.error("Error loading grounded records:", e);
+    const data = await res.json();
+    if (data.audio_base64) await playBase64Audio(data.audio_base64);
+  } catch (err) {
+    console.warn('TTS error:', err.message);
   }
 }
 
-async function handleAddDocument() {
-  const titleInput = document.getElementById("docTitleInput");
-  const contentInput = document.getElementById("docContentInput");
-  const title = titleInput.value.trim();
-  const content = contentInput.value.trim();
+async function playBase64Audio(b64) {
+  stopAudio();
+  isSpeaking = true;
+  setOrbState('speaking');
 
-  if (!title || !content) {
-    alert("Please provide both document title and content.");
-    return;
+  return new Promise(resolve => {
+    try {
+      const bytes = atob(b64);
+      const arr   = new Uint8Array(bytes.length);
+      for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+      const blob  = new Blob([arr], { type: 'audio/wav' });
+      const url   = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      currentAudio = audio;
+
+      audio.onended = () => {
+        URL.revokeObjectURL(url);
+        isSpeaking = false;
+        resetOrb();
+        currentAudio = null;
+        resolve();
+      };
+      audio.onerror = () => {
+        URL.revokeObjectURL(url);
+        isSpeaking = false;
+        resetOrb();
+        currentAudio = null;
+        resolve();
+      };
+      audio.play().catch(() => { isSpeaking = false; resetOrb(); resolve(); });
+    } catch (e) {
+      isSpeaking = false;
+      resetOrb();
+      resolve();
+    }
+  });
+}
+
+function stopAudio() {
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio.currentTime = 0;
+    currentAudio = null;
   }
+  isSpeaking = false;
+  if (!isRecording && !isProcessing) resetOrb();
+}
+
+/* ── DOCUMENTS ───────────────────────────────────────────── */
+async function loadDocuments() {
+  try {
+    const res  = await fetch('/api/documents');
+    const docs = await res.json();
+    renderDocList(docs);
+  } catch (e) {
+    console.warn('Failed to load documents:', e.message);
+  }
+}
+
+async function addDocument() {
+  const title   = document.getElementById('docTitle')?.value.trim();
+  const content = document.getElementById('docBody')?.value.trim();
+  if (!title || !content) { showAlert('Please enter both a title and content for the document.'); return; }
 
   try {
-    const response = await fetch("/api/documents", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, content }),
+    const res  = await fetch('/api/documents', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, content })
     });
-    const data = await response.json();
-
+    const data = await res.json();
     if (data.success) {
-      titleInput.value = "";
-      contentInput.value = "";
-      await loadGroundedDocuments();
-      alert("Government record attached! RTI Copilot is now grounded with this official notice.");
+      document.getElementById('docTitle').value = '';
+      document.getElementById('docBody').value  = '';
+      await loadDocuments();
+      showToast('Document attached ✓');
     }
-  } catch (e) {
-    alert("Failed to add document.");
+  } catch (err) {
+    showAlert(`Failed to add document: ${err.message}`);
   }
 }
 
-/* ==========================================================================
-   STEPPER & NAVIGATION
-   ========================================================================== */
+function renderDocList(docs) {
+  const list   = document.getElementById('docList');
+  const badge  = document.getElementById('docCount');
+  if (!list) return;
+  if (badge) badge.textContent = docs.length;
 
-function advanceStep(stepNumber) {
-  for (let i = 1; i <= 4; i++) {
-    const el = document.getElementById(`step${i}`);
-    if (el) {
-      if (i === stepNumber) {
-        el.classList.add("active");
-        el.setAttribute("aria-current", "step");
-      } else if (i < stepNumber) {
-        el.classList.add("completed");
-        el.classList.remove("active");
-        el.removeAttribute("aria-current");
-      } else {
-        el.classList.remove("active", "completed");
-        el.removeAttribute("aria-current");
-      }
+  list.innerHTML = docs.map(d => `
+    <li class="doc-item">
+      <svg class="doc-item-icon" width="14" height="14" viewBox="0 0 24 24" fill="none">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+              stroke="currentColor" stroke-width="2"/>
+        <polyline points="14 2 14 8 20 8" stroke="currentColor" stroke-width="2"/>
+      </svg>
+      <span>${escapeHtml(d.title)}</span>
+    </li>`).join('');
+}
+
+/* ── CHAT UI HELPERS ─────────────────────────────────────── */
+function addMessage(role, text) {
+  const box = document.getElementById('chatMessages');
+  if (!box) return;
+
+  const isUser  = role === 'user';
+  const avatar  = isUser ? '👤' : '🏛';
+  const div     = document.createElement('div');
+  div.className = `msg ${role}`;
+  div.innerHTML = `
+    <div class="msg-avatar" aria-hidden="true">${avatar}</div>
+    <div class="msg-bubble">${formatMessage(text)}</div>`;
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+}
+
+function addLoadingBubble(id) {
+  const box = document.getElementById('chatMessages');
+  if (!box) return;
+  const div = document.createElement('div');
+  div.id        = id;
+  div.className = 'msg assistant loading';
+  div.innerHTML = `
+    <div class="msg-avatar" aria-hidden="true">🏛</div>
+    <div class="msg-bubble" aria-label="Loading response">
+      <span style="display:inline-flex;gap:4px;align-items:center">
+        <span style="animation:orbPulse 0.6s ease infinite">·</span>
+        <span style="animation:orbPulse 0.6s ease 0.2s infinite">·</span>
+        <span style="animation:orbPulse 0.6s ease 0.4s infinite">·</span>
+      </span>
+    </div>`;
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+}
+
+function removeLoadingBubble(id) {
+  document.getElementById(id)?.remove();
+}
+
+function formatMessage(text) {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\n/g, '<br>');
+}
+
+function escapeHtml(str) {
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+/* ── ORB STATE ───────────────────────────────────────────── */
+function setOrbState(state) {
+  const orb  = document.getElementById('btnVoice');
+  const mic  = document.getElementById('orbMicIcon');
+  const stop = document.getElementById('orbStopIcon');
+  if (!orb) return;
+
+  orb.className = `orb ${state}`;
+  orb.setAttribute('aria-label', {
+    recording:  'Tap to stop recording',
+    processing: 'Processing — please wait',
+    speaking:   'Tap to stop speaking',
+    idle:       'Tap to speak your RTI query',
+  }[state] || 'Tap to speak');
+
+  if (mic && stop) {
+    mic.classList.toggle('hidden',  state === 'recording' || state === 'processing');
+    stop.classList.toggle('hidden', state !== 'recording');
+  }
+}
+
+function resetOrb() { setOrbState('idle'); }
+
+function setHint(text) {
+  const el = document.getElementById('orbHint');
+  if (el) el.textContent = text;
+}
+
+function setLevelBar(pct) {
+  const fill = document.getElementById('levelFill');
+  if (fill) fill.style.width = `${pct}%`;
+}
+
+/* ── TOAST & ALERT ───────────────────────────────────────── */
+function showToast(msg) {
+  let t = document.getElementById('_toast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = '_toast';
+    Object.assign(t.style, {
+      position:'fixed', bottom:'1.5rem', right:'1.5rem', zIndex:'9999',
+      background:'var(--accent)', color:'#fff',
+      padding:'0.65rem 1.1rem', borderRadius:'8px',
+      fontSize:'0.85rem', fontWeight:'600',
+      boxShadow:'0 4px 20px rgba(0,0,0,0.3)',
+      transition:'opacity 0.3s',
+      pointerEvents:'none',
+    });
+    document.body.appendChild(t);
+  }
+  t.textContent  = msg;
+  t.style.opacity = '1';
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => { t.style.opacity = '0'; }, 2500);
+}
+
+function showAlert(msg) {
+  // Accessible alert in chat instead of alert()
+  addMessage('assistant', `ℹ️ ${msg}`);
+}
+
+/* ── PCM → WAV ENCODER ───────────────────────────────────── */
+function encodeWav(chunks, sampleRate) {
+  // Merge chunks
+  let total = 0;
+  chunks.forEach(c => total += c.length);
+  const merged = new Float32Array(total);
+  let off = 0;
+  chunks.forEach(c => { merged.set(c, off); off += c.length; });
+
+  // Resample to 16kHz if needed
+  const targetRate = 16000;
+  let samples = merged;
+  if (sampleRate !== targetRate) {
+    const ratio     = sampleRate / targetRate;
+    const newLen    = Math.round(merged.length / ratio);
+    samples         = new Float32Array(newLen);
+    for (let i = 0; i < newLen; i++) {
+      samples[i] = merged[Math.min(Math.round(i * ratio), merged.length - 1)];
     }
   }
+
+  // Build WAV
+  const buf  = new ArrayBuffer(44 + samples.length * 2);
+  const view = new DataView(buf);
+  const ws   = (o, s) => { for (let i=0;i<s.length;i++) view.setUint8(o+i, s.charCodeAt(i)); };
+
+  ws(0, 'RIFF');
+  view.setUint32(4,  36 + samples.length * 2, true);
+  ws(8, 'WAVE');
+  ws(12, 'fmt ');
+  view.setUint32(16, 16, true);   // chunk size
+  view.setUint16(20, 1,  true);   // PCM
+  view.setUint16(22, 1,  true);   // mono
+  view.setUint32(24, targetRate, true);
+  view.setUint32(28, targetRate * 2, true);
+  view.setUint16(32, 2,  true);
+  view.setUint16(34, 16, true);
+  ws(36, 'data');
+  view.setUint32(40, samples.length * 2, true);
+
+  let cursor = 44;
+  for (let i = 0; i < samples.length; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(cursor, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+    cursor += 2;
+  }
+
+  return new Blob([buf], { type: 'audio/wav' });
 }
 
-function switchRightTab(tabName) {
-  const isDraft = tabName === "draft";
-  document.getElementById("tabDraftBtn").classList.toggle("active", isDraft);
-  document.getElementById("tabDraftBtn").setAttribute("aria-selected", isDraft);
-  document.getElementById("tabDocsBtn").classList.toggle("active", !isDraft);
-  document.getElementById("tabDocsBtn").setAttribute("aria-selected", !isDraft);
-
-  document.getElementById("paneDraft").style.display = isDraft ? "flex" : "none";
-  document.getElementById("paneDocs").style.display = !isDraft ? "flex" : "none";
-
-  if (!isDraft) {
-    loadGroundedDocuments();
+/* ── BASE64 HELPER ───────────────────────────────────────── */
+function bufToBase64(arrayBuffer) {
+  const bytes = new Uint8Array(arrayBuffer);
+  let binary  = '';
+  const chunk = 8192;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
   }
-}
-
-function setMobileView(viewName) {
-  document.body.setAttribute("data-mobile-view", viewName);
-  
-  document.getElementById("mTabChat").classList.toggle("active", viewName === "chat");
-  document.getElementById("mTabDraft").classList.toggle("active", viewName === "draft");
-  document.getElementById("mTabDocs").classList.toggle("active", viewName === "docs");
-
-  if (viewName === "draft") {
-    switchRightTab("draft");
-  } else if (viewName === "docs") {
-    switchRightTab("docs");
-  }
-}
-
-async function confirmReset() {
-  if (confirm("Are you sure you want to start a new RTI application session?")) {
-    stopAudioPlayback();
-    await fetch("/api/reset", { method: "POST" });
-    location.reload();
-  }
+  return btoa(binary);
 }
