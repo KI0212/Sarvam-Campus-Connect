@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RTI Copilot — Citizen Legal Assistant | Sarvam AI</title>
+  <meta name="description" content="A universally accessible, modern legal assistant helping Indian citizens draft statutory Right to Information applications in 13 Indic languages.">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body data-theme="light" data-font-size="normal">
+  <!-- Accessibility: Skip to Main Content -->
+  <a href="#chat-section" class="skip-link">Skip to RTI Assistant dialogue</a>
+
+  <!-- Top Accessibility & Utility Toolbar -->
+  <div class="accessibility-bar" role="region" aria-label="Accessibility Settings">
+    <div class="accessibility-container">
+      <div class="a11y-group" aria-label="Text Size Controls">
+        <span class="a11y-label">Text Size:</span>
+        <button type="button" class="a11y-btn" id="btnFontNormal" onclick="setFontSize('normal')" aria-label="Standard text size" aria-pressed="true">A</button>
+        <button type="button" class="a11y-btn" id="btnFontLarge" onclick="setFontSize('large')" aria-label="Large text size" aria-pressed="false">A+</button>
+        <button type="button" class="a11y-btn" id="btnFontXLarge" onclick="setFontSize('xlarge')" aria-label="Extra large text size" aria-pressed="false">A++</button>
+      </div>
+
+      <div class="a11y-group" aria-label="Visual Contrast Controls">
+        <span class="a11y-label">Contrast:</span>
+        <button type="button" class="a11y-btn contrast-toggle" id="btnThemeDefault" onclick="setTheme('light')" aria-pressed="true">Standard</button>
+        <button type="button" class="a11y-btn contrast-toggle" id="btnThemeHighContrast" onclick="setTheme('high-contrast')" aria-pressed="false">High Contrast (AAA)</button>
+        <button type="button" class="a11y-btn contrast-toggle" id="btnThemeDark" onclick="setTheme('dark')" aria-pressed="false">Dark</button>
+      </div>
+
+      <div class="a11y-group">
+        <button type="button" class="a11y-btn speech-btn" id="btnToggleSpeech" onclick="toggleSpeechHelp()" aria-label="Toggle screen audio readout">
+          <span aria-hidden="true">🔊</span> Audio Readout: <span id="speechStatus">Off</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Primary Application Header -->
+  <header class="app-header" role="banner">
+    <div class="header-inner">
+      <div class="brand-block">
+        <div class="emblem" aria-hidden="true">⚖️</div>
+        <div>
+          <div class="brand-title-row">
+            <h1 class="brand-title">RTI Copilot</h1>
+            <span class="statutory-pill">RTI Act, 2005</span>
+          </div>
+          <p class="brand-tagline">Citizen Legal Assistant for Right to Information Applications</p>
+        </div>
+      </div>
+
+      <div class="header-status">
+        <div class="engine-indicator">
+          <span class="pulse-dot" aria-hidden="true"></span>
+          <span>Powered by <strong>Sarvam AI</strong> Indic Intelligence</span>
+        </div>
+        <div class="header-actions">
+          <button type="button" class="btn btn-secondary" onclick="confirmReset()" aria-label="Reset current conversation">
+            <span aria-hidden="true">🔄</span> Start Fresh
+          </button>
+          <button type="button" class="btn btn-primary" onclick="generateDraft()" aria-label="Compile formal RTI application draft">
+            <span aria-hidden="true">📑</span> Compile Draft
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Citizen Progress Stepper -->
+    <nav class="stepper-nav" aria-label="RTI Application Steps">
+      <ol class="stepper-list">
+        <li class="step-item active" id="step1" aria-current="step">
+          <span class="step-num">1</span>
+          <span class="step-title">State Issue & Dept</span>
+        </li>
+        <li class="step-arrow" aria-hidden="true">➔</li>
+        <li class="step-item" id="step2">
+          <span class="step-num">2</span>
+          <span class="step-title">Specify Records</span>
+        </li>
+        <li class="step-arrow" aria-hidden="true">➔</li>
+        <li class="step-item" id="step3">
+          <span class="step-num">3</span>
+          <span class="step-title">Time Period</span>
+        </li>
+        <li class="step-arrow" aria-hidden="true">➔</li>
+        <li class="step-item" id="step4">
+          <span class="step-num">4</span>
+          <span class="step-title">Review & Submit</span>
+        </li>
+      </ol>
+    </nav>
+  </header>
+
+  <!-- Mobile View Switcher (Visible only on small screens) -->
+  <div class="mobile-tabs" role="tablist" aria-label="Mobile Navigation">
+    <button type="button" class="m-tab active" id="mTabChat" role="tab" aria-selected="true" onclick="setMobileView('chat')">
+      💬 Assistant
+    </button>
+    <button type="button" class="m-tab" id="mTabDraft" role="tab" aria-selected="false" onclick="setMobileView('draft')">
+      📄 RTI Draft
+    </button>
+    <button type="button" class="m-tab" id="mTabDocs" role="tab" aria-selected="false" onclick="setMobileView('docs')">
+      📁 Records (<span class="doc-badge-count">2</span>)
+    </button>
+  </div>
+
+  <!-- Main Work Area -->
+  <main class="app-main" id="main-content">
+    
+    <!-- LEFT PANEL: Guided Conversational Assistant -->
+    <section class="panel chat-panel" id="chat-section" role="region" aria-label="Conversational Assistant">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">Guided Citizen Dialogue</h2>
+          <p class="panel-subtitle">Step-by-step statutory interview — no legal jargon required</p>
+        </div>
+      </div>
+
+      <!-- Quick Issue Presets for Easy Tap Access -->
+      <div class="quick-inquiries" aria-label="Common Citizen Inquiries">
+        <span class="quick-label">Common Topics:</span>
+        <button type="button" class="chip" onclick="handleQuickPrompt('I want to enquire about road repair, tender work, and pothole filling in my ward.')">
+          🚧 Road Repair Tender
+        </button>
+        <button type="button" class="chip" onclick="handleQuickPrompt('I want certified copies of evaluated answer sheet and marks re-verification from university.')">
+          🎓 University Answer Sheet
+        </button>
+        <button type="button" class="chip" onclick="handleQuickPrompt('I want to inspect expenditure and utilization of MLA/MP Local Area Development funds.')">
+          🏛️ MLA / MP Fund Usage
+        </button>
+        <button type="button" class="chip" onclick="handleQuickPrompt('My ration card application has been pending without explanation for over six months.')">
+          🌾 Ration Card Delay
+        </button>
+      </div>
+
+      <!-- Message History (ARIA Live for Screen Readers) -->
+      <div class="messages-container" id="chatMessages" role="log" aria-live="polite" aria-label="Conversation log">
+        <div class="message-card msg-bot">
+          <div class="msg-avatar" aria-hidden="true">🏛️</div>
+          <div class="msg-content">
+            <div class="msg-speaker">RTI Copilot</div>
+            <div class="msg-text">
+<strong>Namaste! I am your RTI Copilot.</strong>
+
+Under the Right to Information Act, 2005, every citizen has the legal right to inspect government records and request certified copies from public authorities.
+
+We will build your formal application step-by-step so you don't have to worry about legal formatting. 
+
+To begin, <strong>which government department, municipal office, or public issue</strong> would you like to inquire about?
+            </div>
+            <div class="msg-actions">
+              <button type="button" class="btn-listen" onclick="speakMessage(this)" aria-label="Listen to this message">
+                🔊 Listen
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Input Form with Oversized Touch Targets -->
+      <form class="chat-form" id="chatForm" onsubmit="handleChatSubmit(event)" aria-label="Send message to RTI Copilot">
+        <label for="chatInput" class="sr-only">Type your response or question to the RTI Copilot</label>
+        <div class="input-wrapper">
+          <textarea 
+            id="chatInput" 
+            class="text-input" 
+            rows="1" 
+            placeholder="Type your response here in English or your regional language..." 
+            aria-required="true"
+            onkeydown="handleInputKeydown(event)"></textarea>
+          
+          <button type="submit" class="btn-send" id="btnSend" aria-label="Send message">
+            <span>Send</span>
+            <span aria-hidden="true" class="send-arrow">➔</span>
+          </button>
+        </div>
+        <div class="input-hint">
+          <span>💡 Tip: Press <kbd>Enter</kbd> to send, <kbd>Shift + Enter</kbd> for a new line. Answers are kept confidential.</span>
+        </div>
+      </form>
+    </section>
+
+    <!-- RIGHT PANEL: Draft Document & Grounded Records -->
+    <section class="panel draft-panel" id="draft-section" role="region" aria-label="RTI Application Document and Grounding">
+      <!-- Secondary Tabs -->
+      <div class="panel-tabs" role="tablist">
+        <button type="button" class="panel-tab active" id="tabDraftBtn" role="tab" aria-selected="true" onclick="switchRightTab('draft')">
+          📄 Statutory RTI Application Draft
+        </button>
+        <button type="button" class="panel-tab" id="tabDocsBtn" role="tab" aria-selected="false" onclick="switchRightTab('docs')">
+          📁 Grounded Official Records (<span class="doc-badge-count">2</span>)
+        </button>
+      </div>
+
+      <!-- TAB 1: RTI APPLICATION DRAFT PREVIEW -->
+      <div class="tab-pane active" id="paneDraft" role="tabpanel" aria-labelledby="tabDraftBtn">
+        <!-- Draft Action Bar -->
+        <div class="draft-action-bar">
+          <div class="lang-selector-group">
+            <label for="langSelect" class="selector-label">Language:</label>
+            <select id="langSelect" class="selector-control" onchange="handleLanguageChange()" aria-label="Select RTI Application Language">
+              <option value="en-IN">English (India)</option>
+              <option value="hi-IN">Hindi (हिन्दी)</option>
+              <option value="mr-IN">Marathi (मराठी)</option>
+              <option value="ta-IN">Tamil (தமிழ்)</option>
+              <option value="te-IN">Telugu (తెలుగు)</option>
+              <option value="kn-IN">Kannada (ಕನ್ನಡ)</option>
+              <option value="bn-IN">Bengali (বাংলা)</option>
+              <option value="gu-IN">Gujarati (ગુજરાતી)</option>
+              <option value="ml-IN">Malayalam (മലയാളം)</option>
+              <option value="pa-IN">Punjabi (ਪੰਜਾਬੀ)</option>
+              <option value="od-IN">Odia (ଓଡ଼ିଆ)</option>
+              <option value="as-IN">Assamese (অসমীয়া)</option>
+              <option value="ur-IN">Urdu (اردو)</option>
+            </select>
+          </div>
+
+          <div class="draft-btn-group">
+            <button type="button" class="btn btn-sm" onclick="speakDraft()" aria-label="Read full RTI draft aloud">
+              <span aria-hidden="true">🔊</span> Read
+            </button>
+            <button type="button" class="btn btn-sm" onclick="copyDraftToClipboard()" aria-label="Copy draft text to clipboard">
+              <span aria-hidden="true">📋</span> Copy
+            </button>
+            <button type="button" class="btn btn-sm" onclick="downloadDraftFile()" aria-label="Download application draft as a text file">
+              <span aria-hidden="true">💾</span> Download
+            </button>
+            <button type="button" class="btn btn-sm btn-print" onclick="window.print()" aria-label="Print submission-ready RTI application">
+              <span aria-hidden="true">🖨️</span> Print
+            </button>
+          </div>
+        </div>
+
+        <!-- The Formal RTI Application Document Container -->
+        <article class="draft-document-view" id="draftDocumentArea" aria-label="RTI Application Draft" tabindex="0">
+          <div class="document-watermark" aria-hidden="true">RTI ACT, 2005</div>
+          <div class="draft-text" id="draftContent">
+[No draft generated yet. Engage with the RTI Copilot on the left to provide your specifics, then click "Compile Draft" at any time.]
+          </div>
+        </article>
+
+        <!-- Citizen Advisory Callout -->
+        <aside class="advisory-box" role="note">
+          <span class="advisory-icon" aria-hidden="true">ℹ️</span>
+          <div>
+            <strong>Citizen Submission Checklist:</strong>
+            <span>Attach the prescribed ₹10 application fee (IPO / Court Fee Stamp / Online receipt). If you are Below Poverty Line (BPL), proof of BPL card exempts you from all fees under Section 7(5).</span>
+          </div>
+        </aside>
+      </div>
+
+      <!-- TAB 2: GROUNDED OFFICIAL RECORDS -->
+      <div class="tab-pane" id="paneDocs" role="tabpanel" aria-labelledby="tabDocsBtn" style="display: none;">
+        <div class="docs-management">
+          <div class="docs-intro">
+            <h3>Official Government Records & Notices</h3>
+            <p>Documents added here ground the Copilot in real orders, tender notifications, and PIO designations.</p>
+          </div>
+
+          <!-- Add Document Form -->
+          <div class="add-document-card">
+            <h4>+ Add Official Document / Circular for Grounding</h4>
+            <div class="form-group">
+              <label for="docTitleInput" class="form-label">Notice or Document Title:</label>
+              <input type="text" id="docTitleInput" class="text-input" placeholder="e.g. Municipal Work Order No. PWD/2023/889">
+            </div>
+            <div class="form-group">
+              <label for="docContentInput" class="form-label">Document Text / Circular Content:</label>
+              <textarea id="docContentInput" class="text-input" rows="4" placeholder="Paste the text of the government circular, tender notice, or department notification..."></textarea>
+            </div>
+            <button type="button" class="btn btn-primary" onclick="handleAddDocument()">
+              Attach Grounding Record
+            </button>
+          </div>
+
+          <!-- List of Grounded Documents -->
+          <div class="grounded-list" id="groundedList" aria-label="Grounded Documents List">
+            <!-- Populated dynamically -->
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="app-footer" role="contentinfo">
+    <div class="footer-container">
+      <p>RTI Copilot is an open civic tool powered by Sarvam AI. It is designed to assist citizens in exercising their statutory rights under the Right to Information Act, 2005.</p>
+      <p class="footer-meta">WCAG 2.1 AA Compliant • Universal Accessibility • 13 Official Indic Languages</p>
+    </div>
+  </footer>
+
+  <script src="/app.js"></script>
+</body>
+</html>
