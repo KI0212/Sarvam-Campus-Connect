@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """
-RTI Copilot - Modern Web Application Server
-Powered by Sarvam AI & Python's standard library http.server (Zero extra dependencies)
+RTI Copilot - Modern Voice-Enabled Web Application Server
+Powered by Sarvam AI (Speech-to-Text Saaras, Text-to-Speech Bulbul, sarvam-105b-conversations)
+Zero extra dependencies — runs on Python's standard library.
 """
 
 import json
 import os
 import sys
+import base64
 from pathlib import Path
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse
@@ -126,6 +128,51 @@ class RTIRequestHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._send_json({"error": str(e)}, status=500)
 
+        elif parsed.path == "/api/voice-chat":
+            # Round-trip Sarvam Voice Agent interaction
+            audio_b64 = payload.get("audio_base64", "")
+            mime_type = payload.get("mime_type", "audio/webm")
+            language_code = payload.get("language_code", "unknown")
+
+            if not audio_b64:
+                self._send_json({"error": "Missing audio data"}, status=400)
+                return
+
+            try:
+                audio_bytes = base64.b64decode(audio_b64)
+                result = copilot_instance.voice_chat(audio_bytes, mime_type, language_code)
+                self._send_json(result)
+            except Exception as e:
+                self._send_json({"error": str(e)}, status=500)
+
+        elif parsed.path == "/api/tts":
+            # Text-to-Speech via Sarvam Bulbul
+            text = payload.get("text", "")
+            language_code = payload.get("language_code", "en-IN")
+            if not text:
+                self._send_json({"error": "Text is required"}, status=400)
+                return
+            try:
+                audio_b64 = copilot_instance.synthesize_speech(text, language_code)
+                self._send_json({"audio_base64": audio_b64})
+            except Exception as e:
+                self._send_json({"error": str(e)}, status=500)
+
+        elif parsed.path == "/api/stt":
+            # Speech-to-Text via Sarvam Saaras
+            audio_b64 = payload.get("audio_base64", "")
+            mime_type = payload.get("mime_type", "audio/webm")
+            language_code = payload.get("language_code", "unknown")
+            if not audio_b64:
+                self._send_json({"error": "Missing audio data"}, status=400)
+                return
+            try:
+                audio_bytes = base64.b64decode(audio_b64)
+                result = copilot_instance.transcribe_audio(audio_bytes, mime_type, language_code)
+                self._send_json(result)
+            except Exception as e:
+                self._send_json({"error": str(e)}, status=500)
+
         elif parsed.path == "/api/generate-draft":
             lang = payload.get("language_code", "en-IN")
             try:
@@ -165,7 +212,7 @@ class RTIRequestHandler(BaseHTTPRequestHandler):
 def run_server(port=8080):
     server_address = ("127.0.0.1", port)
     httpd = HTTPServer(server_address, RTIRequestHandler)
-    print(f"RTI Copilot Web Server running at: http://localhost:{port}")
+    print(f"RTI Copilot Voice-Enabled Server running at: http://localhost:{port}")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

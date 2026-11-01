@@ -1,31 +1,36 @@
 import os
+import re
+import io
 from typing import List, Dict, Optional
 from config import get_sarvam_client, SUPPORTED_LANGUAGES
 
-RTI_SYSTEM_PROMPT = """You are the RTI Copilot, a specialized legal assistant designed to help citizens frame formal Right to Information (RTI) applications under the Right to Information Act, 2005 (India).
+RTI_SYSTEM_PROMPT = """You are the RTI Copilot, a specialized legal voice assistant designed to help Indian citizens frame formal Right to Information (RTI) applications under the Right to Information Act, 2005.
 
 Core Objectives:
-1. Guided Dialogue: Instead of asking for everything at once, use a step-by-step approach to identify:
-   - The specific information the user is seeking (factual records, file notings, inspection, expenditures, sanction orders).
-   - The relevant public authority (Panchayat, Municipal Corporation, Ministry, Police Dept, University, etc.) and appropriate Public Information Officer (PIO).
-   - The time period involved (e.g. FY 2023-24, past 6 months).
+1. Guided Dialogue & Voice Interaction:
+   - Walk the citizen step-by-step through:
+     a) The specific information sought (factual records, inspection, file notings, work orders, payment vouchers).
+     b) The relevant public authority (Panchayat, Municipal Corporation, Ministry, Police Dept, University) and PIO.
+     c) The time period involved (e.g. FY 2023-24, past 6 months).
+   - Keep replies conversational, concise, and speakable. Avoid overwhelming paragraphs in voice turns.
 
-2. Grounding & Accuracy:
+2. Multilingual Natural Dialogue:
+   - If the user addresses you in an Indian regional language (Hindi, Marathi, Tamil, Telugu, Kannada, Bengali, Gujarati, Malayalam, Punjabi, Odia, Urdu, etc.), respond naturally and empathetically in that same regional language.
+   - Maintain accurate RTI Act terminology while avoiding unnecessary legal jargon.
+
+3. Grounding & Accuracy:
    - Use provided government records, public notices, and official documents to ensure the request is precise.
-   - If the user's request is vague, suggest specific document names, tender numbers, or sections from the grounded data to make the RTI more effective.
+   - If the user's request is vague, suggest specific document names, tender numbers, or sections from the grounded data.
 
-3. Legal Compliance:
-   - Follow statutory requirements of the RTI Act, 2005.
-   - Maintain a formal, objective, and clear tone. Avoid argumentative, accusatory, or emotive language (e.g. avoid asking "why was work delayed?", instead ask "provide certified copies of correspondence regarding the delay").
+4. Legal Compliance:
    - Frame queries under Section 6(1) and reference Section 4 (proactive disclosure) or Section 2(j) (inspection/certified copies).
+   - Ensure the final draft follows statutory requirements with applicant declarations and fee details.
 
-4. Constraint:
-   - Do NOT invent facts. If grounded documents do not contain the answer, inform the user that the specific detail needs to be verified or provided by them.
+5. Constraint:
+   - Do NOT invent facts. If grounded documents do not contain the answer, inform the citizen that the detail needs to be verified or provided by them.
 
 Interaction Style:
-- Professional, empathetic, and supportive.
-- Avoid legal jargon during the conversational dialogue; use simple terms and explain clearly.
-- Only introduce formal legal structure when compiling the final draft.
+- Professional, empathetic, supportive, and accessible to citizens of all literacy and age levels.
 """
 
 class RTICopilot:
@@ -53,7 +58,6 @@ class RTICopilot:
     def add_grounding_document(self, title: str, content: str):
         """Adds an official notice, government order, or circular for grounding."""
         self.grounded_documents.append({"title": title, "content": content})
-        # Update system prompt in active conversation
         self.messages[0] = {"role": "system", "content": self._build_system_prompt()}
 
     def get_grounding_documents(self) -> List[Dict[str, str]]:
@@ -66,12 +70,94 @@ class RTICopilot:
         response = self.client.chat.completions(
             messages=self.messages,
             model="sarvam-105b-conversations",
-            temperature=0.4
+            temperature=0.3
         )
 
         reply = response.choices[0].message.content
         self.messages.append({"role": "assistant", "content": reply})
         return reply
+
+    def transcribe_audio(self, audio_bytes: bytes, mime_type: str = "audio/webm", language_code: str = "unknown") -> Dict[str, str]:
+        """
+        Transcribes speech audio using Sarvam Saaras STT (saaras:v3).
+        Supports automatic language detection or specific Indic regional languages.
+        """
+        ext = "webm" if "webm" in mime_type else "wav" if "wav" in mime_type else "mp3"
+        filename = f"voice_input.{ext}"
+        
+        file_tuple = (filename, io.BytesIO(audio_bytes), mime_type)
+        
+        target_lang = language_code if language_code and language_code != "auto" else "unknown"
+
+        res = self.client.speech_to_text.transcribe(
+            file=file_tuple,
+            model="saaras:v3",
+            language_code=target_lang
+        )
+        
+        return {
+            "transcript": res.transcript or "",
+            "language_code": getattr(res, "language_code", target_lang)
+        }
+
+    def synthesize_speech(self, text: str, language_code: str = "en-IN") -> Optional[str]:
+        """
+        Synthesizes speech audio using Sarvam Bulbul TTS (bulbul:v3).
+        Returns base64 encoded audio string (WAV format).
+        """
+        try:
+            # Strip markdown characters for smooth speech
+            clean_text = re.sub(r'[*_#`~>\[\]()]', '', text).strip()
+            
+            # Select up to first 2-3 sentences for concise, speakable voice reply
+            paragraphs = [p.strip() for p in clean_text.split("\n") if p.strip()]
+            spoken_text = " ".join(paragraphs[:2]) if paragraphs else clean_text
+            if len(spoken_text) > 420:
+                spoken_text = spoken_text[:400] + "..."
+
+            # Map to supported TTS languages (Bulbul v3 supports 11 major Indic languages)
+            tts_langs = {'bn-IN', 'en-IN', 'gu-IN', 'hi-IN', 'kn-IN', 'ml-IN', 'mr-IN', 'od-IN', 'pa-IN', 'ta-IN', 'te-IN'}
+            target_tts_lang = language_code if language_code in tts_langs else "en-IN"
+
+            res = self.client.text_to_speech.convert(
+                text=spoken_text,
+                language_code=target_tts_lang,
+                model="bulbul:v3"
+            )
+            if res.audios and len(res.audios) > 0:
+                return res.audios[0]
+        except Exception as e:
+            print(f"Error in synthesize_speech: {e}")
+        return None
+
+    def voice_chat(self, audio_bytes: bytes, mime_type: str = "audio/webm", language_code: str = "unknown") -> Dict[str, any]:
+        """
+        Full Voice Agent cycle:
+        1. Speech-to-Text via Sarvam Saaras
+        2. Conversational reasoning via Sarvam-105b
+        3. Text-to-Speech via Sarvam Bulbul
+        """
+        stt_result = self.transcribe_audio(audio_bytes, mime_type, language_code)
+        transcript = stt_result.get("transcript", "").strip()
+        detected_lang = stt_result.get("language_code", "en-IN")
+
+        if not transcript:
+            return {
+                "transcript": "",
+                "reply": "I couldn't hear your voice clearly. Please press the microphone and try speaking again.",
+                "audio_base64": None,
+                "language_code": detected_lang
+            }
+
+        reply = self.chat(transcript)
+        audio_base64 = self.synthesize_speech(reply, language_code=detected_lang)
+
+        return {
+            "transcript": transcript,
+            "reply": reply,
+            "audio_base64": audio_base64,
+            "language_code": detected_lang
+        }
 
     def generate_draft(self, language_code: str = "en-IN") -> Dict[str, str]:
         """
@@ -138,7 +224,6 @@ Provide only the formal application draft in clean markdown, suitable for printi
                 continue
 
             try:
-                # If paragraph is very long, translate in chunks
                 if len(stripped) > 800:
                     lines = stripped.split("\n")
                     sub_chunks = []
@@ -162,8 +247,7 @@ Provide only the formal application draft in clean markdown, suitable for printi
                         mode="formal"
                     )
                     translated_paragraphs.append(res.translated_text)
-            except Exception as e:
-                # Fallback to original text if translation encounters error
+            except Exception:
                 translated_paragraphs.append(stripped)
 
         return "\n\n".join(translated_paragraphs)

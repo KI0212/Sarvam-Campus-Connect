@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>RTI Copilot — Citizen Legal Assistant | Sarvam AI</title>
-  <meta name="description" content="A universally accessible, modern legal assistant helping Indian citizens draft statutory Right to Information applications in 13 Indic languages.">
+  <title>RTI Copilot — Voice-First Legal Assistant | Sarvam AI</title>
+  <meta name="description" content="A universally accessible, modern voice agent helping Indian citizens draft statutory Right to Information applications in all Indic regional languages.">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body data-theme="light" data-font-size="normal">
@@ -29,8 +29,8 @@
       </div>
 
       <div class="a11y-group">
-        <button type="button" class="a11y-btn speech-btn" id="btnToggleSpeech" onclick="toggleSpeechHelp()" aria-label="Toggle screen audio readout">
-          <span aria-hidden="true">🔊</span> Audio Readout: <span id="speechStatus">Off</span>
+        <button type="button" class="a11y-btn speech-btn active" id="btnAutoPlayVoice" onclick="toggleAutoVoice()" aria-pressed="true">
+          <span aria-hidden="true">🔊</span> Voice Responses: <span id="autoVoiceStatus">Enabled</span>
         </button>
       </div>
     </div>
@@ -46,18 +46,18 @@
             <h1 class="brand-title">RTI Copilot</h1>
             <span class="statutory-pill">RTI Act, 2005</span>
           </div>
-          <p class="brand-tagline">Citizen Legal Assistant for Right to Information Applications</p>
+          <p class="brand-tagline">Multilingual Voice Legal Assistant for Citizens across all Indian States</p>
         </div>
       </div>
 
       <div class="header-status">
         <div class="engine-indicator">
           <span class="pulse-dot" aria-hidden="true"></span>
-          <span>Powered by <strong>Sarvam AI</strong> Indic Intelligence</span>
+          <span>Sarvam AI <strong>Saaras STT</strong> & <strong>Bulbul Voice</strong></span>
         </div>
         <div class="header-actions">
-          <button type="button" class="btn btn-secondary" onclick="confirmReset()" aria-label="Reset current conversation">
-            <span aria-hidden="true">🔄</span> Start Fresh
+          <button type="button" class="btn btn-secondary" onclick="confirmReset()" aria-label="Reset conversation">
+            <span aria-hidden="true">🔄</span> Reset
           </button>
           <button type="button" class="btn btn-primary" onclick="generateDraft()" aria-label="Compile formal RTI application draft">
             <span aria-hidden="true">📑</span> Compile Draft
@@ -71,7 +71,7 @@
       <ol class="stepper-list">
         <li class="step-item active" id="step1" aria-current="step">
           <span class="step-num">1</span>
-          <span class="step-title">State Issue & Dept</span>
+          <span class="step-title">State Issue (Voice/Text)</span>
         </li>
         <li class="step-arrow" aria-hidden="true">➔</li>
         <li class="step-item" id="step2">
@@ -92,10 +92,10 @@
     </nav>
   </header>
 
-  <!-- Mobile View Switcher (Visible only on small screens) -->
+  <!-- Mobile View Switcher (Visible on small screens) -->
   <div class="mobile-tabs" role="tablist" aria-label="Mobile Navigation">
     <button type="button" class="m-tab active" id="mTabChat" role="tab" aria-selected="true" onclick="setMobileView('chat')">
-      💬 Assistant
+      🎙️ Voice Assistant
     </button>
     <button type="button" class="m-tab" id="mTabDraft" role="tab" aria-selected="false" onclick="setMobileView('draft')">
       📄 RTI Draft
@@ -108,29 +108,76 @@
   <!-- Main Work Area -->
   <main class="app-main" id="main-content">
     
-    <!-- LEFT PANEL: Guided Conversational Assistant -->
-    <section class="panel chat-panel" id="chat-section" role="region" aria-label="Conversational Assistant">
+    <!-- LEFT PANEL: Guided Conversational & Voice Assistant -->
+    <section class="panel chat-panel" id="chat-section" role="region" aria-label="Voice & Conversational Assistant">
       <div class="panel-header">
         <div>
-          <h2 class="panel-title">Guided Citizen Dialogue</h2>
-          <p class="panel-subtitle">Step-by-step statutory interview — no legal jargon required</p>
+          <h2 class="panel-title">Sarvam Voice Agent & Dialogue</h2>
+          <p class="panel-subtitle">Speak or type in your regional language — Sarvam AI will listen and respond</p>
+        </div>
+      </div>
+
+      <!-- SARVAM VOICE AGENT INTERACTIVE BANNER -->
+      <div class="voice-agent-box" role="region" aria-label="Sarvam Regional Voice Interface">
+        <div class="voice-controls-row">
+          <div class="voice-btn-container">
+            <button type="button" class="voice-record-btn" id="btnVoiceRecord" onclick="toggleVoiceRecording()" aria-label="Start speaking with RTI Voice Copilot">
+              <span class="voice-mic-icon" id="voiceMicIcon" aria-hidden="true">🎙️</span>
+              <span class="voice-btn-label" id="voiceBtnLabel">Tap to Speak</span>
+            </button>
+            <div class="voice-pulse-ring" id="voicePulseRing" aria-hidden="true"></div>
+          </div>
+
+          <div class="voice-info-block">
+            <div class="voice-status-line" id="voiceStatusText">
+              Ready to listen in all Indian regional languages.
+            </div>
+            <div class="voice-sub-controls">
+              <label for="voiceLangSelect" class="voice-lang-label">Spoken Language:</label>
+              <select id="voiceLangSelect" class="voice-lang-select" aria-label="Select Spoken Regional Language">
+                <option value="unknown">🌐 Auto-Detect Regional Language</option>
+                <option value="hi-IN">Hindi (हिन्दी)</option>
+                <option value="mr-IN">Marathi (मराठी)</option>
+                <option value="ta-IN">Tamil (தமிழ்)</option>
+                <option value="te-IN">Telugu (తెలుగు)</option>
+                <option value="kn-IN">Kannada (ಕನ್ನಡ)</option>
+                <option value="bn-IN">Bengali (বাংলা)</option>
+                <option value="gu-IN">Gujarati (ગુજરાતી)</option>
+                <option value="ml-IN">Malayalam (മലയാളം)</option>
+                <option value="pa-IN">Punjabi (ਪੰਜਾਬੀ)</option>
+                <option value="od-IN">Odia (ଓଡ଼ିଆ)</option>
+                <option value="en-IN">English (India)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Audio Player Indicator when Voice Agent is Speaking -->
+        <div class="voice-playback-bar" id="voicePlaybackBar" style="display: none;">
+          <div class="playback-indicator">
+            <span class="speaker-icon">🔊</span>
+            <span id="playbackStatus">Playing Sarvam Bulbul Indic Voice...</span>
+          </div>
+          <button type="button" class="btn-stop-audio" onclick="stopAudioPlayback()" aria-label="Stop audio voice playback">
+            ⏹ Stop Audio
+          </button>
         </div>
       </div>
 
       <!-- Quick Issue Presets for Easy Tap Access -->
       <div class="quick-inquiries" aria-label="Common Citizen Inquiries">
-        <span class="quick-label">Common Topics:</span>
-        <button type="button" class="chip" onclick="handleQuickPrompt('I want to enquire about road repair, tender work, and pothole filling in my ward.')">
+        <span class="quick-label">Tap to Inquire:</span>
+        <button type="button" class="chip" onclick="handleQuickPrompt('I want to enquire about road repair, tender work, and pothole filling in my municipal ward.')">
           🚧 Road Repair Tender
         </button>
-        <button type="button" class="chip" onclick="handleQuickPrompt('I want certified copies of evaluated answer sheet and marks re-verification from university.')">
-          🎓 University Answer Sheet
+        <button type="button" class="chip" onclick="handleQuickPrompt('I want certified copies of evaluated answer sheet and mark verification from university.')">
+          🎓 University Marks
         </button>
-        <button type="button" class="chip" onclick="handleQuickPrompt('I want to inspect expenditure and utilization of MLA/MP Local Area Development funds.')">
-          🏛️ MLA / MP Fund Usage
+        <button type="button" class="chip" onclick="handleQuickPrompt('I want to check utilization of MLA or MP Local Area Development funds in my area.')">
+          🏛️ MLA / MP Funds
         </button>
-        <button type="button" class="chip" onclick="handleQuickPrompt('My ration card application has been pending without explanation for over six months.')">
-          🌾 Ration Card Delay
+        <button type="button" class="chip" onclick="handleQuickPrompt('My ration card application has been pending without explanation for over 6 months.')">
+          🌾 Ration Card
         </button>
       </div>
 
@@ -139,19 +186,19 @@
         <div class="message-card msg-bot">
           <div class="msg-avatar" aria-hidden="true">🏛️</div>
           <div class="msg-content">
-            <div class="msg-speaker">RTI Copilot</div>
+            <div class="msg-speaker">RTI Copilot (Voice Agent)</div>
             <div class="msg-text">
 <strong>Namaste! I am your RTI Copilot.</strong>
 
-Under the Right to Information Act, 2005, every citizen has the legal right to inspect government records and request certified copies from public authorities.
+Under the Right to Information Act, 2005, you have the statutory right to demand certified copies of files, tender notices, bills, and inspection of works.
 
-We will build your formal application step-by-step so you don't have to worry about legal formatting. 
+You can <strong>speak naturally using the microphone above</strong> in Hindi, Marathi, Tamil, Telugu, English, or any Indian regional language — or type below.
 
-To begin, <strong>which government department, municipal office, or public issue</strong> would you like to inquire about?
+What government office, municipal department, or civic issue would you like to inquire about?
             </div>
             <div class="msg-actions">
-              <button type="button" class="btn-listen" onclick="speakMessage(this)" aria-label="Listen to this message">
-                🔊 Listen
+              <button type="button" class="btn-listen" onclick="speakSarvamVoice(this)" aria-label="Listen to this message using Sarvam Bulbul voice">
+                🔊 Sarvam Voice
               </button>
             </div>
           </div>
@@ -166,7 +213,7 @@ To begin, <strong>which government department, municipal office, or public issue
             id="chatInput" 
             class="text-input" 
             rows="1" 
-            placeholder="Type your response here in English or your regional language..." 
+            placeholder="Type your response in English or any regional language (or speak above)..." 
             aria-required="true"
             onkeydown="handleInputKeydown(event)"></textarea>
           
@@ -176,7 +223,7 @@ To begin, <strong>which government department, municipal office, or public issue
           </button>
         </div>
         <div class="input-hint">
-          <span>💡 Tip: Press <kbd>Enter</kbd> to send, <kbd>Shift + Enter</kbd> for a new line. Answers are kept confidential.</span>
+          <span>💡 Tip: Press <kbd>Enter</kbd> to send, or press the big microphone button to speak in your regional language.</span>
         </div>
       </form>
     </section>
@@ -217,8 +264,8 @@ To begin, <strong>which government department, municipal office, or public issue
           </div>
 
           <div class="draft-btn-group">
-            <button type="button" class="btn btn-sm" onclick="speakDraft()" aria-label="Read full RTI draft aloud">
-              <span aria-hidden="true">🔊</span> Read
+            <button type="button" class="btn btn-sm" onclick="speakFullDraft()" aria-label="Read full RTI draft aloud via Sarvam Bulbul">
+              <span aria-hidden="true">🔊</span> Read Draft
             </button>
             <button type="button" class="btn btn-sm" onclick="copyDraftToClipboard()" aria-label="Copy draft text to clipboard">
               <span aria-hidden="true">📋</span> Copy
@@ -236,7 +283,7 @@ To begin, <strong>which government department, municipal office, or public issue
         <article class="draft-document-view" id="draftDocumentArea" aria-label="RTI Application Draft" tabindex="0">
           <div class="document-watermark" aria-hidden="true">RTI ACT, 2005</div>
           <div class="draft-text" id="draftContent">
-[No draft generated yet. Engage with the RTI Copilot on the left to provide your specifics, then click "Compile Draft" at any time.]
+[No draft generated yet. Speak with the Voice Copilot or chat on the left to provide your specifics, then click "Compile Draft" at any time.]
           </div>
         </article>
 
@@ -245,7 +292,7 @@ To begin, <strong>which government department, municipal office, or public issue
           <span class="advisory-icon" aria-hidden="true">ℹ️</span>
           <div>
             <strong>Citizen Submission Checklist:</strong>
-            <span>Attach the prescribed ₹10 application fee (IPO / Court Fee Stamp / Online receipt). If you are Below Poverty Line (BPL), proof of BPL card exempts you from all fees under Section 7(5).</span>
+            <span>Attach the statutory ₹10 application fee (Indian Postal Order / Court Fee Stamp / Online receipt). If you possess a Below Poverty Line (BPL) card, you are completely exempt from fees under Section 7(5).</span>
           </div>
         </aside>
       </div>
@@ -255,7 +302,7 @@ To begin, <strong>which government department, municipal office, or public issue
         <div class="docs-management">
           <div class="docs-intro">
             <h3>Official Government Records & Notices</h3>
-            <p>Documents added here ground the Copilot in real orders, tender notifications, and PIO designations.</p>
+            <p>Documents added here ground the Voice Copilot in real orders, tender notifications, and PIO designations.</p>
           </div>
 
           <!-- Add Document Form -->
@@ -267,7 +314,7 @@ To begin, <strong>which government department, municipal office, or public issue
             </div>
             <div class="form-group">
               <label for="docContentInput" class="form-label">Document Text / Circular Content:</label>
-              <textarea id="docContentInput" class="text-input" rows="4" placeholder="Paste the text of the government circular, tender notice, or department notification..."></textarea>
+              <textarea id="docContentInput" class="text-input" rows="4" placeholder="Paste notification text, tender number, department circular, or PIO details..."></textarea>
             </div>
             <button type="button" class="btn btn-primary" onclick="handleAddDocument()">
               Attach Grounding Record
@@ -287,7 +334,7 @@ To begin, <strong>which government department, municipal office, or public issue
   <footer class="app-footer" role="contentinfo">
     <div class="footer-container">
       <p>RTI Copilot is an open civic tool powered by Sarvam AI. It is designed to assist citizens in exercising their statutory rights under the Right to Information Act, 2005.</p>
-      <p class="footer-meta">WCAG 2.1 AA Compliant • Universal Accessibility • 13 Official Indic Languages</p>
+      <p class="footer-meta">Sarvam Saaras STT • Sarvam Bulbul Voice • Universal Accessibility • 13 Official Indic Languages</p>
     </div>
   </footer>
 
