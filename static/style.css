@@ -445,6 +445,39 @@ body[data-theme="light"] .topbar {
 }
 .msg-bubble p + p { margin-top: 0.5em; }
 
+/* In-chat statutory draft document preview */
+.chat-draft-preview {
+  margin-top: 0.75rem;
+  background: var(--bg-card);
+  border: 1px solid rgba(99,102,241,0.3);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+}
+.chat-draft-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.45rem 0.75rem;
+  background: rgba(99,102,241,0.08);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--accent-hover);
+}
+.chat-draft-body {
+  padding: 0.85rem;
+  font-family: var(--font-legal);
+  font-size: 0.8rem;
+  line-height: 1.6;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 260px;
+  overflow-y: auto;
+  background: rgba(0,0,0,0.2);
+}
+
 /* Transcript preview during recording */
 .msg.partial .msg-bubble {
   border-color: rgba(99,102,241,0.4);

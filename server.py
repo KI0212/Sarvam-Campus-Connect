@@ -32,7 +32,7 @@ MIME_TYPES = {
 # Global copilot instance for active session
 copilot_instance = RTICopilot()
 
-# Pre-loaded sample government grounding documents
+# Sample documents available for user reference if requested
 SAMPLE_DOCUMENTS = [
     {
         "title": "Municipal Corporation Notice No. PWD/2023/889 - Road Repairs Ward 12",
@@ -58,10 +58,6 @@ Prescribed Fees for Inspection: Rs. 10/- RTI application fee, Rs. 2/- per page f
 Record Retention Period: Answer scripts preserved for 6 months from result declaration date."""
     }
 ]
-
-# Initialize sample documents
-for doc in SAMPLE_DOCUMENTS:
-    copilot_instance.add_grounding_document(doc["title"], doc["content"])
 
 class RTIRequestHandler(BaseHTTPRequestHandler):
     def _send_json(self, data, status=200):
@@ -124,7 +120,10 @@ class RTIRequestHandler(BaseHTTPRequestHandler):
                 return
             try:
                 reply = copilot_instance.chat(user_msg)
-                self._send_json({"reply": reply})
+                self._send_json({
+                    "reply": reply,
+                    "draft": copilot_instance.current_draft
+                })
             except Exception as e:
                 self._send_json({"error": str(e)}, status=500)
 

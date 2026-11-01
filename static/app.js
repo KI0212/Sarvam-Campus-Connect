@@ -211,6 +211,11 @@ async function submitAudio(blob) {
     // Show AI reply
     if (data.reply) {
       addMessage('assistant', data.reply);
+      if (data.draft) {
+        currentDraft = data.draft;
+        showDraft(data.draft);
+        showToast('RTI Draft compiled ✓');
+      }
       if (autoVoicePlayback && data.audio_base64) {
         await playBase64Audio(data.audio_base64);
       }
@@ -252,6 +257,11 @@ async function sendTextMessage() {
 
     if (data.reply) {
       addMessage('assistant', data.reply);
+      if (data.draft) {
+        currentDraft = data.draft;
+        showDraft(data.draft);
+        showToast('RTI Draft compiled ✓');
+      }
       if (autoVoicePlayback) {
         const lang = document.getElementById('voiceLang')?.value || 'en-IN';
         playTTS(data.reply, lang);
@@ -509,10 +519,40 @@ function removeLoadingBubble(id) {
 }
 
 function formatMessage(text) {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
+  if (!text) return '';
+
+  // If message contains full statutory draft block, render formatted card
+  if (text.includes('--- BEGIN RTI DRAFT ---') && text.includes('--- END RTI DRAFT ---')) {
+    const parts = text.split('--- BEGIN RTI DRAFT ---');
+    const intro = parts[0].trim();
+    const afterParts = parts[1].split('--- END RTI DRAFT ---');
+    const draftContent = afterParts[0].trim();
+    const outro = (afterParts[1] || '').trim();
+
+    let html = '';
+    if (intro) {
+      html += `<div>${formatSimple(intro)}</div>`;
+    }
+    html += `
+      <div class="chat-draft-preview">
+        <div class="chat-draft-header">
+          <span>📜 Statutory RTI Application</span>
+          <button type="button" class="pill" onclick="copyDraft()" style="min-height:26px;padding:2px 8px;font-size:0.72rem;">Copy</button>
+        </div>
+        <pre class="chat-draft-body">${escapeHtml(draftContent)}</pre>
+      </div>`;
+    if (outro) {
+      html += `<div style="margin-top:0.5rem;">${formatSimple(outro)}</div>`;
+    }
+    return html;
+  }
+
+  return formatSimple(text);
+}
+
+function formatSimple(text) {
+  return escapeHtml(text)
+    .replace(/\n\n+/g, '<br><br>')
     .replace(/\n/g, '<br>');
 }
 
