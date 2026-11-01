@@ -122,7 +122,8 @@ class RTIRequestHandler(BaseHTTPRequestHandler):
                 reply = copilot_instance.chat(user_msg)
                 self._send_json({
                     "reply": reply,
-                    "draft": copilot_instance.current_draft
+                    "draft": copilot_instance.current_draft,
+                    "checklist": copilot_instance.get_checklist()
                 })
             except Exception as e:
                 self._send_json({"error": str(e)}, status=500)

@@ -17,7 +17,13 @@ if ENV_PATH.exists():
 def get_sarvam_client() -> SarvamAI:
     api_key = os.environ.get("SARVAM_API_KEY")
     if not api_key:
-        raise ValueError("SARVAM_API_KEY is not set in environment or .env file.")
+        try:
+            import streamlit as st
+            api_key = st.secrets.get("SARVAM_API_KEY")
+        except Exception:
+            pass
+    if not api_key:
+        raise ValueError("SARVAM_API_KEY is not set in environment, .env file, or Streamlit secrets.")
     return SarvamAI(api_subscription_key=api_key)
 
 SUPPORTED_LANGUAGES = {

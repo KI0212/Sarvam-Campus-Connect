@@ -211,6 +211,9 @@ async function submitAudio(blob) {
     // Show AI reply
     if (data.reply) {
       addMessage('assistant', data.reply);
+      if (data.checklist) {
+        updateReadinessTracker(data.checklist);
+      }
       if (data.draft) {
         currentDraft = data.draft;
         showDraft(data.draft);
@@ -257,6 +260,9 @@ async function sendTextMessage() {
 
     if (data.reply) {
       addMessage('assistant', data.reply);
+      if (data.checklist) {
+        updateReadinessTracker(data.checklist);
+      }
       if (data.draft) {
         currentDraft = data.draft;
         showDraft(data.draft);
@@ -336,6 +342,29 @@ function clearDraft() {
   const content     = document.getElementById('draftContent');
   if (placeholder) placeholder.classList.remove('hidden');
   if (content) { content.textContent = ''; content.classList.add('hidden'); }
+  updateReadinessTracker({ authority: false, records: false, period: false, applicant: false, fee: false, pct: 0 });
+}
+
+function updateReadinessTracker(cl) {
+  if (!cl) return;
+  const pctEl  = document.getElementById('readinessPct');
+  const fillEl = document.getElementById('readinessFill');
+  const pct = Math.min(100, Math.max(0, cl.pct || 0));
+  if (pctEl)  pctEl.textContent = `${pct}%`;
+  if (fillEl) fillEl.style.width = `${pct}%`;
+
+  const map = {
+    badgeAuth:      cl.authority,
+    badgeRecords:   cl.records,
+    badgePeriod:    cl.period,
+    badgeApplicant: cl.applicant,
+    badgeFee:       cl.fee,
+  };
+
+  Object.entries(map).forEach(([id, active]) => {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('active', Boolean(active));
+  });
 }
 
 /* ── DRAFT ACTIONS ───────────────────────────────────────── */

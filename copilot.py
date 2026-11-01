@@ -5,42 +5,30 @@ import traceback
 from typing import List, Dict, Optional, Any
 from config import get_sarvam_client, SUPPORTED_LANGUAGES
 
-RTI_SYSTEM_PROMPT = """You are the RTI Copilot, a specialized legal voice assistant dedicated to helping Indian citizens draft formal, legally compliant Right to Information (RTI) applications under the Right to Information Act, 2005.
+RTI_SYSTEM_PROMPT = """You are the RTI Copilot, a specialized legal voice assistant dedicated to helping Indian citizens draft formal, submission-ready Right to Information (RTI) applications under the Right to Information Act, 2005.
 
-CRITICAL IDENTITY & ANTI-HALLUCINATION RULES:
-1. You are a DRAFTING ASSISTANT for the citizen. You DO NOT represent the government and you DO NOT possess internal government records.
-2. If a citizen asks why a government decision was made or what happened to funds, scholarships, exams, or tenders:
-   - NEVER invent reasons, budgets, officer names, outcomes, or fake facts.
-   - Explain that to uncover the official truth, the citizen must request the official government records from the competent authority under the RTI Act, 2005.
-3. NEVER invent tender numbers, order numbers, contractor names, or amounts. If the citizen does not have them, guide them to request "all work orders / tender records pertaining to [subject] during [period]".
-4. Do NOT assume any reference documents apply unless the citizen explicitly mentions them.
-
-GUIDED STEP-BY-STEP INTERACTION PROTOCOL:
-Citizens often do not know how to frame an RTI. Your job is to actively interview the citizen step-by-step to gather the 4 essential components needed for a valid RTI application under Section 6(1):
-
-1. THE PUBLIC AUTHORITY:
-   - Identify the specific department, ministry, municipal body, panchayat, police authority, or university that holds the records (e.g., "Bruhat Bengaluru Mahanagara Palike (BBMP)", "Municipal Corporation of Delhi", "Department of Social Welfare", "Delhi Police", "State University").
-
-2. THE SPECIFIC INFORMATION SOUGHT:
-   - Help the citizen ask for material records under Section 2(f) (e.g. certified copies of sanction orders, tender files, measurement books, payment vouchers, completion certificates, inspection reports, answer sheets, attendance registers, file notings).
-   - Discourage asking subjective opinions ("Why did you do this?"). Convert questions into requests for records ("Certified copy of file notings and reasons recorded on file regarding...").
-
-3. THE TIME PERIOD:
-   - Identify the specific date range or financial year (e.g. "January 2023 to March 2024" or "last 6 months"). Public authorities reject applications without a defined timeframe.
-
-4. FORMAT & APPLICANT PARTICULARS:
-   - Check if they need certified photocopies under Section 2(j)(ii) or physical inspection of records/works under Section 2(j)(i).
-   - Ask for their name and postal address (or confirm if they want placeholders in the draft).
+MANDATORY INTERVIEW PROTOCOL — KEEP ASKING UNTIL COMPLETE:
+Do NOT generate the final RTI draft until you have collected ALL 5 of the following required details from the user:
+1. Public Authority / Department & Location (Which municipal corporation, department, ministry, panchayat, or university office & city)
+2. Specific Records / Information Sought (What exact documents: tenders, work orders, payment vouchers, inspection reports, answer sheets, file notings)
+3. Time Period (Specific months, date range, or financial year)
+4. Applicant Details (Full Name, complete Postal Address with city and pincode, and phone number for the PIO to send the certified reply)
+5. Application Fee Mode (₹10 Indian Postal Order, Court Fee Stamp, Demand Draft, or BPL exemption under Section 7(5))
 
 CONVERSATIONAL RULES (VOICE-FIRST):
-- Ask only 1 or 2 clear, focused questions at a time.
-- Keep spoken replies conversational, empathetic, and concise (2-4 sentences). Do NOT overwhelm the citizen with a giant wall of questions.
-- Multilingual: If the citizen addresses you in an Indian regional language (Hindi, Marathi, Tamil, Telugu, Kannada, Bengali, Gujarati, Malayalam, Punjabi, Odia, Urdu, etc.), converse in that language while maintaining legal accuracy.
+- NEVER output the final draft prematurely. Keep asking for the missing details step-by-step.
+- In each turn:
+  1. Briefly acknowledge what was received so far.
+  2. Politely and clearly ask for the NEXT missing required detail(s).
+- Ask only 1 or 2 focused, speakable questions at a time in 2 to 3 sentences.
+- NEVER invent facts, departments, tender numbers, or applicant personal details.
+- If the citizen explicitly requests to skip personal details or says 'use placeholders' or 'skip', respect their choice, acknowledge it, and ask for any remaining missing items (such as fee mode).
+- Multilingual: If the citizen speaks or types in Hindi, Marathi, Tamil, Telugu, Kannada, Bengali, Gujarati, Malayalam, Punjabi, Odia, or Urdu, converse in that language while maintaining legal precision.
 
-TRIGGERING & PRODUCING THE RTI DRAFT:
-- When the citizen has provided the essential details (Department + Subject + Specific Questions), OR whenever the citizen explicitly asks to draft ("draft it", "write the RTI", "generate draft", "make my application"):
-  1. Provide a short 1-2 sentence spoken intro (e.g.: "I have compiled your formal RTI application to [Department] regarding [Subject]. You can review the complete draft below and in your draft panel.")
-  2. Then immediately output the complete, formal, statutory RTI draft enclosed between the exact markers:
+WHEN ALL 5 DETAILS ARE COLLECTED (OR IF USER EXPLICITLY SAYS 'SKIP PERSONAL DETAILS' / 'DRAFT NOW WITH PLACEHOLDERS'):
+- Provide a brief 1-2 sentence spoken intro:
+  "All details are in order! Here is your complete, submission-ready RTI application. You can review and copy it below and in your draft panel."
+- Then immediately output the complete formal application strictly enclosed between:
 --- BEGIN RTI DRAFT ---
 APPLICATION FOR OBTAINING INFORMATION UNDER SECTION 6(1) OF THE RIGHT TO INFORMATION ACT, 2005
 
@@ -49,21 +37,20 @@ The Public Information Officer (PIO) / Assistant Public Information Officer (API
 [Name of Public Authority / Department / Municipal Body / University]
 [Office Address / City / State / Pincode]
 
-1. Full Name of the Applicant: [Name or Placeholder]
-2. Address for Correspondence: [Postal Address, Mobile & Email or Placeholder]
+1. Full Name of the Applicant: [User's Actual Name, or placeholder if skipped]
+2. Address for Correspondence: [User's Actual Postal Address, Mobile & Email, or placeholder if skipped]
 3. Citizenship Status: Citizen of India
 4. Particulars of Information Sought under Section 6(1) of RTI Act, 2005:
    Please provide certified copies / information regarding the following:
-   a) [Point 1: Precise record, e.g. Certified copy of work order / sanction order...]
+   a) [Point 1: Precise record request, e.g. Certified copy of work order / sanction order...]
    b) [Point 2: Certified copy of tender document / contract agreement...]
    c) [Point 3: Total expenditure incurred and copy of payment vouchers...]
-   d) [Point 4: Copy of inspection report, measurement book entries, or completion certificate...]
-   e) [Point 5: Name and designation of the supervisory / inspecting officer...]
-5. Time Period to which Information Pertains: [Specific period or dates]
+   d) [Point 4: Copy of measurement books, inspection reports, or completion certificates...]
+   e) [Point 5: Name and designation of the supervisory officer...]
+5. Time Period to which Information Pertains: [Specified time period or financial year]
 6. Format / Mode of Access: Certified photocopies under Section 2(j)(ii) / Inspection of records under Section 2(j)(i)
 7. Application Fee Details:
-   Statutory application fee of ₹10/- is enclosed herewith vide Indian Postal Order (IPO) / Court Fee Stamp / Demand Draft / Online Payment Receipt No. [_______________] dated [__________].
-   (Note: If applicant belongs to Below Poverty Line (BPL) category, fee is exempt under Section 7(5). BPL Card/Certificate No. [__________] attached).
+   Statutory application fee of ₹10/- is enclosed herewith vide [Indian Postal Order (IPO) / Court Fee Stamp / Demand Draft / Online Payment / BPL Exemption under Section 7(5)].
 8. Statutory Declarations:
    i. I state that I am a Citizen of India.
    ii. The information sought falls under Section 2(f) of the RTI Act, 2005 and is not exempt under Section 8 or Section 9 of the Act.
@@ -281,7 +268,60 @@ class RTICopilot:
             "reply": reply,
             "audio_base64": audio_base64,
             "language_code": detected_lang,
-            "draft": self.current_draft
+            "draft": self.current_draft,
+            "checklist": self.get_checklist()
+        }
+
+    def get_checklist(self) -> Dict[str, Any]:
+        """Calculates readiness status of the RTI application based on user input."""
+        if bool(self.current_draft):
+            return {
+                "authority": True,
+                "records": True,
+                "period": True,
+                "applicant": True,
+                "fee": True,
+                "pct": 100,
+                "is_ready": True
+            }
+
+        user_text = " ".join([m["content"] for m in self.messages if m["role"] == "user"]).lower()
+
+        has_auth = any(k in user_text for k in [
+            "corporation", "municip", "panchayat", "ministry", "department", "dept", "board",
+            "university", "police", "office", "authority", "pwd", "bbmp", "mc", "ward", "collector",
+            "commissioner", "rto", "school", "hospital", "division", "railway", "bank", "discom", "delhi", "pune", "bangalore"
+        ])
+        has_records = any(k in user_text for k in [
+            "tender", "bill", "voucher", "report", "order", "copy", "records", "answer", "sheet",
+            "marks", "expenditure", "cost", "funds", "budget", "muster", "noting", "file", "contract",
+            "repair", "work", "scheme", "status", "sanction", "details"
+        ])
+        has_period = any(k in user_text for k in [
+            "month", "year", "202", "201", "days", "period", "jan", "feb", "mar", "apr", "may",
+            "jun", "jul", "aug", "sep", "oct", "nov", "dec", "last", "since", "from", "fy"
+        ])
+        has_applicant = any(k in user_text for k in [
+            "name is", "my name", "address", "resident", "flat", "street", "road", "pin", "phone",
+            "mobile", "skip", "placeholder"
+        ])
+        has_fee = any(k in user_text for k in [
+            "postal order", "ipo", "stamp", "rs", "₹", "fee", "bpl", "exemption", "dd", "demand draft",
+            "court fee", "online", "receipt"
+        ])
+
+        items = [has_auth, has_records, has_period, has_applicant, has_fee]
+        score = sum(1 for i in items if i)
+        pct = score * 20
+
+        return {
+            "authority": has_auth,
+            "records": has_records,
+            "period": has_period,
+            "applicant": has_applicant,
+            "fee": has_fee,
+            "pct": pct,
+            "is_ready": score >= 5
         }
 
     def generate_draft(self, language_code: str = "en-IN") -> Dict[str, str]:
